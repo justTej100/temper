@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Price Forecast — Search</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="/" class="logo">Price<span>Forecast</span></a>
+            <p class="tagline">On-demand price dip prediction</p>
+        </div>
+    </header>
+
+    <main class="container">
+        <section class="search-hero">
+            <h1>When will the price drop?</h1>
+            <p>Search any product to see its price history and get a forecast of the next likely dip — models are trained on demand, not pre-computed.</p>
+
+            <form id="search-form" class="search-form">
+                <input
+                    type="text"
+                    id="search-input"
+                    placeholder="Search products (e.g. Sony WH-1000XM5)"
+                    autocomplete="off"
+                    required
+                >
+                <button type="submit" id="search-btn">Search</button>
+            </form>
+        </section>
+
+        <div id="loading" class="loading hidden">
+            <div class="spinner"></div>
+            <p id="loading-text">Searching...</p>
+        </div>
+
+        <div id="error" class="error-banner hidden"></div>
+
+        <section id="results" class="results hidden">
+            <h2>Results</h2>
+            <div id="results-list" class="results-list"></div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <div class="container">
+            <p>Models compared: ARIMA · SARIMA · ARIMAX · SARIMAX · Prophet · GARCH</p>
+            <p><a href="http://localhost:5000" target="_blank">MLflow Experiments</a></p>
+        </div>
+    </footer>
+
+    <script src="/static/js/search.js"></script>
+</body>
+</html>
