@@ -24,8 +24,8 @@ User Search → Cache Check → [hit] Serve instantly
 | Database | PostgreSQL |
 | Forecasting | pmdarima, statsmodels, Prophet, arch (GARCH) |
 | Experiment tracking | MLflow |
-| Frontend | Django templates + Chart.js |
-| Hosting | Docker Compose (web + worker + db + redis + mlflow) |
+| Frontend | Next.js 15 + React + Tailwind + Chart.js |
+| Hosting | Docker Compose (frontend + web + worker + db + redis + mlflow) |
 
 ## Quick Start
 
@@ -37,6 +37,9 @@ cp .env.example .env
 docker compose up --build
 
 # Open the app
+open http://localhost:3000
+
+# API root (JSON)
 open http://localhost:8000
 
 # MLflow experiment dashboard
@@ -90,8 +93,7 @@ The model with the lowest MAE is flagged `is_best` and used for predictions.
 config/           Django settings, Celery, URLs
 products/         Models, API views, Celery tasks, admin
 forecasting/      Model training, metrics, storage, data sources
-templates/        Frontend HTML
-static/           CSS + JS (Chart.js integration)
+frontend/         Next.js React app
 ```
 
 ## Configuration
@@ -105,12 +107,14 @@ See `.env.example` for all settings. Key variables:
 
 ## Development (without Docker)
 
+### Backend
+
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 # Requires local Postgres + Redis + MLflow running
-export DATABASE_URL=postgres://forecast:forecast@localhost:5432/forecast
+export DATABASE_URL=postgres://forecast:forecast@localhost:5433/forecast
 python manage.py migrate
 python manage.py runserver
 
@@ -118,6 +122,16 @@ python manage.py runserver
 celery -A config worker -l info
 mlflow server --port 5000
 ```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
+```
+
+Open http://localhost:3000 — the dev server hot-reloads against the Django API on port 8000.
 
 ## License
 

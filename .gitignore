@@ -41,3 +41,8 @@ htmlcov/
 # Celery
 celerybeat-schedule
 celerybeat.pid
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
