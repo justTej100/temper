@@ -1,9 +1,10 @@
 # How to Run
 
 ```bash
-cp .env.example .env
-docker compose up --build
+docker compose up --build --watch
 ```
+
+Code changes hot-reload — no manual restarts. Django uses gunicorn `--reload`, Next runs in `dev` mode, and Celery restarts on Python file changes via Compose Watch.
 
 Open:
 
@@ -42,24 +43,13 @@ User Search → Cache Check → [hit] Serve instantly
 
 ## Quick Start
 
+No `.env` file required for the default demo setup — Docker Compose ships with sensible defaults (demo data, local model storage, in-compose Postgres/Redis/MLflow).
+
 ```bash
-# Clone and configure
-cp .env.example .env
-
-# Start everything
-docker compose up --build
-
-# Open the app
-open http://localhost:3000
-
-# API root (JSON)
-open http://localhost:8000
-
-# MLflow experiment dashboard
-open http://localhost:5000
+docker compose up --build --watch
 ```
 
-Search for any product (e.g. "Sony headphones"). In demo mode, synthetic price history with realistic sale dips is generated instantly. The first search triggers model training (~30-60s); subsequent searches within 24h serve cached results.
+Code changes apply automatically (Django/Next hot-reload; Celery restarts on Python edits). No `.env` file required for the default demo setup.
 
 ## Data Sources
 
