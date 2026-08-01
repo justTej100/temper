@@ -1,10 +1,11 @@
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from forecasting.data_sources.base import get_data_source
+from forecasting.dip_model import predict_dip_for_product
 from forecasting.trainer import predict_with_model
 
 from .models import ForecastJob, Product, ProductModel
@@ -16,6 +17,28 @@ from .serializers import (
 )
 from .services import get_cached_best_model
 from .tasks import run_forecast_pipeline
+
+ACTIVE_JOB_STATUSES = [
+    ForecastJob.Status.PENDING,
+    ForecastJob.Status.FETCHING,
+    ForecastJob.Status.TRAINING,
+]
+
+
+def _dip_prediction_payload(prediction):
+    if not prediction:
+        return None
+    return {
+        "probabilities": prediction.probabilities,
+        "expected_dip_date": prediction.expected_dip_date.isoformat() if prediction.expected_dip_date else None,
+        "expected_dip_price": float(prediction.expected_dip_price) if prediction.expected_dip_price else None,
+        "confidence": prediction.confidence,
+        "recommendation": prediction.recommendation,
+        "reason": prediction.reason,
+        "dip_threshold": prediction.dip_threshold,
+        "horizon_days": prediction.horizon_days,
+        "generated_at": prediction.generated_at.isoformat(),
+    }
 
 
 class SearchView(APIView):
@@ -34,6 +57,7 @@ class SearchView(APIView):
             return Response({"results": [], "message": "No products found"})
 
         response_results = []
+        today = timezone.localdate()
         for item in results:
             product, _ = Product.objects.get_or_create(
                 external_id=item["external_id"],
@@ -43,8 +67,22 @@ class SearchView(APIView):
                 product.name = item["name"]
                 product.save(update_fields=["name"])
 
+            active_job = ForecastJob.objects.filter(
+                product=product,
+                status__in=ACTIVE_JOB_STATUSES,
+            ).order_by("-created_at").first()
+            if active_job and not force_refresh:
+                response_results.append({
+                    "product_id": product.id,
+                    "name": product.name,
+                    "status": "processing",
+                    "job_id": active_job.id,
+                })
+                continue
+
             cached = None if force_refresh else get_cached_best_model(product)
-            if cached:
+            scraped_today = product.last_scraped_at and timezone.localtime(product.last_scraped_at).date() == today
+            if cached and scraped_today:
                 response_results.append({
                     "product_id": product.id,
                     "name": product.name,
@@ -105,6 +143,7 @@ class ProductForecastView(APIView):
 
         price_points = product.price_points.all()
         forecast = predict_with_model(best_model, price_points)
+        dip_prediction = predict_dip_for_product(product)
 
         history = [
             {"date": pp.recorded_at.isoformat(), "price": float(pp.price)}
@@ -139,6 +178,7 @@ class ProductForecastView(APIView):
             "product_name": product.name,
             "price_history": history,
             "forecast": forecast,
+            "dip_prediction": _dip_prediction_payload(dip_prediction),
             "model_comparison": comparison,
             "best_model": best_model.model_type,
         })
@@ -149,6 +189,16 @@ class ProductRetrainView(APIView):
 
     def post(self, request, product_id):
         product = get_object_or_404(Product, id=product_id)
+        active_job = ForecastJob.objects.filter(
+            product=product,
+            status__in=ACTIVE_JOB_STATUSES,
+        ).order_by("-created_at").first()
+        if active_job:
+            return Response(
+                {"job_id": active_job.id, "status": "processing"},
+                status=status.HTTP_202_ACCEPTED,
+            )
+
         job = ForecastJob.objects.create(product=product, status=ForecastJob.Status.PENDING)
         run_forecast_pipeline.delay(job.id)
         return Response(

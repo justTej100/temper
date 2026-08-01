@@ -38,6 +38,18 @@ export interface PricePoint {
   price: number;
 }
 
+
+export interface DipPrediction {
+  probabilities: Record<string, number>;
+  expected_dip_date: string | null;
+  expected_dip_price: number | null;
+  confidence: "low" | "medium" | "high" | string;
+  recommendation: "buy" | "watch" | "wait" | string;
+  reason: string;
+  dip_threshold: number;
+  horizon_days: number;
+  generated_at: string;
+}
 export interface Forecast {
   forecast_dates: string[];
   forecast_prices: number[];
@@ -51,6 +63,7 @@ export interface ProductForecast {
   product_name: string;
   price_history: PricePoint[];
   forecast: Forecast;
+  dip_prediction: DipPrediction | null;
   model_comparison: ModelComparison[];
   best_model: string;
 }

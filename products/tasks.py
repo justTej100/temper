@@ -4,9 +4,10 @@ from celery import shared_task
 from django.utils import timezone
 
 from forecasting.data_sources.base import get_data_source
+from forecasting.dip_model import predict_dip_for_product, train_global_dip_model
 from forecasting.trainer import train_all_models
 
-from .models import ForecastJob, Product
+from .models import ForecastJob
 from .services import save_model_results, save_price_points
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ def run_forecast_pipeline(self, job_id: int):
         source = get_data_source()
         records = source.fetch_price_history(product.external_id)
         save_price_points(product, records)
+        train_global_dip_model()
 
         job.status = ForecastJob.Status.TRAINING
         job.save(update_fields=["status"])
@@ -33,6 +35,7 @@ def run_forecast_pipeline(self, job_id: int):
         price_points = product.price_points.all()
         training_output = train_all_models(price_points, product.id, product.name)
         save_model_results(product, job, training_output)
+        predict_dip_for_product(product, force_refresh=True)
 
         job.status = ForecastJob.Status.COMPLETE
         job.completed_at = timezone.now()

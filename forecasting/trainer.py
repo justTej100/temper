@@ -286,6 +286,104 @@ def _fit_garch(train: pd.Series, test: pd.Series) -> ModelResult | None:
         return None
 
 
+def _refit_best_on_full_series(best: ModelResult, series: pd.Series) -> ModelResult:
+    """After model selection, refit the winner on all available history."""
+    try:
+        if best.model_type == "arima":
+            model = auto_arima(
+                series,
+                seasonal=False,
+                stepwise=True,
+                suppress_warnings=True,
+                error_action="ignore",
+                max_p=3,
+                max_q=3,
+                max_d=2,
+            )
+            best.fitted_model = model
+            best.params.update({"order": str(model.order), "refit_on_full_history": True})
+
+        elif best.model_type == "sarima":
+            model = auto_arima(
+                series,
+                seasonal=True,
+                m=7,
+                stepwise=True,
+                suppress_warnings=True,
+                error_action="ignore",
+                max_p=2,
+                max_q=2,
+                max_P=1,
+                max_Q=1,
+                max_d=2,
+                max_D=1,
+            )
+            best.fitted_model = model
+            best.params.update({
+                "order": str(model.order),
+                "seasonal_order": str(model.seasonal_order),
+                "refit_on_full_history": True,
+            })
+
+        elif best.model_type == "arimax":
+            exog = build_exogenous_features(series.index)
+            model = auto_arima(
+                series,
+                exogenous=exog,
+                seasonal=False,
+                stepwise=True,
+                suppress_warnings=True,
+                error_action="ignore",
+                max_p=3,
+                max_q=3,
+                max_d=2,
+            )
+            best.fitted_model = model
+            best.params.update({"order": str(model.order), "refit_on_full_history": True})
+
+        elif best.model_type == "sarimax":
+            exog = build_exogenous_features(series.index)
+            model = auto_arima(
+                series,
+                exogenous=exog,
+                seasonal=True,
+                m=7,
+                stepwise=True,
+                suppress_warnings=True,
+                error_action="ignore",
+                max_p=2,
+                max_q=2,
+                max_P=1,
+                max_Q=1,
+                max_d=2,
+                max_D=1,
+            )
+            best.fitted_model = model
+            best.params.update({
+                "order": str(model.order),
+                "seasonal_order": str(model.seasonal_order),
+                "refit_on_full_history": True,
+            })
+
+        elif best.model_type == "prophet":
+            df = series.reset_index()
+            df.columns = ["ds", "y"]
+            df["ds"] = pd.to_datetime(df["ds"]).dt.tz_localize(None)
+            model = Prophet(
+                yearly_seasonality=True,
+                weekly_seasonality=True,
+                daily_seasonality=False,
+                changepoint_prior_scale=0.05,
+            )
+            model.add_country_holidays(country_name="US")
+            model.fit(df)
+            best.fitted_model = model
+            best.params.update({"refit_on_full_history": True})
+
+    except Exception as e:
+        logger.warning("Full-history refit failed for %s: %s", best.model_type, e)
+    return best
+
 def _generate_forecast(best: ModelResult, series: pd.Series, horizon: int = FORECAST_HORIZON) -> pd.Series:
     """Generate forward forecast from the best model."""
     if best.model_type == "prophet":
@@ -349,6 +447,7 @@ def train_all_models(price_points, product_id: int, product_name: str) -> Traini
         raise ValueError("All models failed to fit")
 
     output.best_model = min(comparable, key=lambda r: r.mae)
+    output.best_model = _refit_best_on_full_series(output.best_model, series)
     forecast = _generate_forecast(output.best_model, series)
     output.best_model.forecast = forecast
     dip_date, dip_price = _find_next_dip(series, forecast)

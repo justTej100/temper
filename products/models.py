@@ -80,3 +80,55 @@ class ProductModel(models.Model):
     def __str__(self):
         best = " ★" if self.is_best else ""
         return f"{self.model_type}{best} for {self.product.name}"
+
+class GlobalDipModel(models.Model):
+    """Shared model trained across product histories to estimate discount timing."""
+
+    file_path = models.CharField(max_length=500)
+    params = models.JSONField(default=dict)
+    trained_at = models.DateTimeField(auto_now_add=True)
+    product_count = models.PositiveIntegerField(default=0)
+    observation_count = models.PositiveIntegerField(default=0)
+    event_count = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["-trained_at"]
+
+    def __str__(self):
+        active = "active" if self.is_active else "inactive"
+        return f"Global dip model ({active}) trained at {self.trained_at}"
+
+
+class DipPrediction(models.Model):
+    """Cached buy/wait signal for a product at a point in its price history."""
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="dip_predictions")
+    global_model = models.ForeignKey(
+        GlobalDipModel,
+        on_delete=models.SET_NULL,
+        related_name="predictions",
+        null=True,
+        blank=True,
+    )
+    generated_at = models.DateTimeField(auto_now_add=True)
+    price_as_of = models.DateTimeField(db_index=True)
+    current_price = models.DecimalField(max_digits=10, decimal_places=2)
+    dip_threshold = models.FloatField(default=0.05)
+    horizon_days = models.PositiveIntegerField(default=30)
+    probabilities = models.JSONField(default=dict)
+    expected_dip_date = models.DateField(null=True, blank=True)
+    expected_dip_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    confidence = models.CharField(max_length=20, default="low")
+    recommendation = models.CharField(max_length=20, default="watch")
+    reason = models.TextField(blank=True, default="")
+    features = models.JSONField(default=dict)
+
+    class Meta:
+        ordering = ["-generated_at"]
+        indexes = [
+            models.Index(fields=["product", "price_as_of"]),
+        ]
+
+    def __str__(self):
+        return f"Dip prediction for {self.product.name} as of {self.price_as_of.date()}"

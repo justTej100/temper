@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Header } from "@/components/Header";
 import { DipAlert, NoDipBanner } from "@/components/DipAlert";
+import { DipPredictionPanel } from "@/components/DipPredictionPanel";
 import {
   LoadingSpinner,
   SkeletonChart,
@@ -77,7 +78,7 @@ export default function ProductPage() {
       <main className="mx-auto w-full max-w-5xl flex-1 px-6 pb-12">
         <p className="pt-6">
           <Link href="/" className="text-accent no-underline hover:underline">
-            ← Back to search
+            Back to search
           </Link>
         </p>
 
@@ -112,6 +113,8 @@ export default function ProductPage() {
             ) : (
               <NoDipBanner />
             )}
+
+            <DipPredictionPanel prediction={data.dip_prediction} />
 
             <div className="mt-6">
               <PriceChart

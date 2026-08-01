@@ -1,8 +1,21 @@
+# How to Run
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+Open:
+
+- Frontend: http://localhost:3000
+- API: http://localhost:8000
+- MLflow: http://localhost:5000
+
 # Amazon Price Forecasting
 
-An on-demand product price forecasting site. Search a product, and the system fetches its price history, trains multiple time-series models (ARIMA family + Prophet), compares them on the same train/test split, and predicts when the next price dip is likely.
+An on-demand product price forecasting site. Search a product by link, and the system fetches its price history, trains multiple time-series models (ARIMA family + Prophet), compares them on the same train/test split, and predicts when the next price dip is likely.
 
-**Key design:** Models are trained per-product on demand — not pre-computed across an entire catalog. Compute and storage scale with actual user interest.
+**Key design:** Product searches update shared product-level models. The app keeps per-product forecasts for charting, and also trains a global dip-timing model across accumulated product histories so searches make the system smarter for everyone.
 
 ## Architecture
 
