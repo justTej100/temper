@@ -1,0 +1,291 @@
+from datetime import datetime, timedelta
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlmodel import Session, col, select
+
+from app.config import get_settings
+from app.db import get_session
+from app.models import (
+    City,
+    CityModel,
+    EdgeSnapshot,
+    ForecastJob,
+    JobStatus,
+    Market,
+    ModelPrediction,
+    Observation,
+    TempBucket,
+    TempType,
+)
+from app.schemas import (
+    BucketOut,
+    EdgeOut,
+    JobOut,
+    MarketDetail,
+    MarketListItem,
+    ModelComparisonOut,
+    RetrainResponse,
+)
+from app.tasks import run_forecast_pipeline, sync_polymarket_markets
+
+router = APIRouter(prefix="/api")
+
+
+def _maybe_enqueue_forecast(session: Session, market: Market) -> ForecastJob | None:
+    settings = get_settings()
+    cutoff = datetime.utcnow() - timedelta(hours=settings.model_cache_ttl_hours)
+    best = session.exec(
+        select(CityModel).where(
+            CityModel.city_id == market.city_id,
+            CityModel.temp_type == market.temp_type,
+            CityModel.is_best == True,  # noqa: E712
+            CityModel.trained_at >= cutoff,
+        )
+    ).first()
+    pred = session.exec(
+        select(ModelPrediction)
+        .where(ModelPrediction.market_id == market.id)
+        .order_by(col(ModelPrediction.generated_at).desc())
+    ).first()
+    if best and pred and pred.generated_at >= cutoff:
+        return None
+
+    active = session.exec(
+        select(ForecastJob).where(
+            ForecastJob.market_id == market.id,
+            col(ForecastJob.status).in_(
+                [JobStatus.pending, JobStatus.fetching, JobStatus.training]
+            ),
+        )
+    ).first()
+    if active:
+        return active
+
+    job = ForecastJob(market_id=market.id, status=JobStatus.pending)
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+    run_forecast_pipeline.delay(job.id)
+    return job
+
+
+@router.post("/sync/")
+def trigger_sync(session: Session = Depends(get_session)):
+    """Pull latest Polymarket weather markets (also runs on Celery beat)."""
+    sync_polymarket_markets.delay()
+    return {"status": "queued"}
+
+
+@router.get("/markets/", response_model=list[MarketListItem])
+def list_markets(
+    temp_type: TempType | None = None,
+    sort: str = Query("volume", pattern="^(volume|edge|date)$"),
+    limit: int = Query(50, ge=1, le=200),
+    session: Session = Depends(get_session),
+):
+    markets = session.exec(
+        select(Market).where(Market.active == True).order_by(col(Market.volume).desc())  # noqa: E712
+    ).all()
+    if temp_type:
+        markets = [m for m in markets if m.temp_type == temp_type]
+
+    items: list[MarketListItem] = []
+    for m in markets[:limit]:
+        city = session.get(City, m.city_id)
+        buckets = session.exec(select(TempBucket).where(TempBucket.market_id == m.id)).all()
+        top = max(buckets, key=lambda b: b.yes_price) if buckets else None
+        edges = session.exec(select(EdgeSnapshot).where(EdgeSnapshot.market_id == m.id)).all()
+        max_edge = max((abs(e.edge) for e in edges), default=None)
+        best = session.exec(
+            select(CityModel).where(
+                CityModel.city_id == m.city_id,
+                CityModel.temp_type == m.temp_type,
+                CityModel.is_best == True,  # noqa: E712
+            )
+        ).first()
+        items.append(
+            MarketListItem(
+                id=m.id,
+                question=m.question,
+                city_name=city.name if city else "",
+                temp_type=m.temp_type,
+                target_date=m.target_date,
+                volume=m.volume,
+                url=m.url,
+                top_bucket_label=top.label if top else None,
+                top_bucket_price=top.yes_price if top else None,
+                max_edge=max_edge,
+                best_model=best.model_type if best else None,
+            )
+        )
+
+    if sort == "edge":
+        items.sort(key=lambda x: x.max_edge or 0, reverse=True)
+    elif sort == "date":
+        items.sort(key=lambda x: x.target_date)
+    else:
+        items.sort(key=lambda x: x.volume, reverse=True)
+    return items
+
+
+@router.get("/markets/{market_id}", response_model=MarketDetail)
+def get_market(market_id: int, session: Session = Depends(get_session)):
+    market = session.get(Market, market_id)
+    if not market:
+        raise HTTPException(404, "Market not found")
+    city = session.get(City, market.city_id)
+    job = _maybe_enqueue_forecast(session, market)
+
+    obs = session.exec(
+        select(Observation)
+        .where(Observation.city_id == market.city_id)
+        .order_by(col(Observation.observed_on))
+    ).all()
+    history = []
+    for o in obs:
+        temp = o.high_c if market.temp_type == TempType.high else o.low_c
+        if temp is None:
+            continue
+        history.append({"date": o.observed_on.isoformat(), "temp_c": float(temp)})
+
+    pred = session.exec(
+        select(ModelPrediction)
+        .where(ModelPrediction.market_id == market.id)
+        .order_by(col(ModelPrediction.generated_at).desc())
+    ).first()
+
+    buckets = session.exec(select(TempBucket).where(TempBucket.market_id == market.id)).all()
+    edges = {
+        e.bucket_id: e
+        for e in session.exec(select(EdgeSnapshot).where(EdgeSnapshot.market_id == market.id)).all()
+    }
+    bucket_out = []
+    for b in buckets:
+        e = edges.get(b.id)
+        model_p = (pred.bucket_probs or {}).get(b.label) if pred else None
+        if model_p is None and e:
+            model_p = e.model_prob
+        bucket_out.append(
+            BucketOut(
+                id=b.id,
+                label=b.label,
+                temp_c=b.temp_c,
+                yes_price=b.yes_price,
+                model_prob=model_p,
+                edge=e.edge if e else (float(model_p) - b.yes_price if model_p is not None else None),
+            )
+        )
+    bucket_out.sort(key=lambda b: (b.temp_c is None, b.temp_c or 0))
+
+    models = session.exec(
+        select(CityModel)
+        .where(CityModel.city_id == market.city_id, CityModel.temp_type == market.temp_type)
+        .order_by(col(CityModel.trained_at).desc())
+    ).all()
+    seen = set()
+    comparison = []
+    for m in models:
+        if m.model_type in seen or not m.is_comparable:
+            continue
+        seen.add(m.model_type)
+        comparison.append(
+            ModelComparisonOut(
+                model_type=m.model_type,
+                mae=m.mae,
+                mape=m.mape,
+                rmse=m.rmse,
+                is_best=m.is_best,
+                params=m.params or {},
+            )
+        )
+    comparison.sort(key=lambda x: x.mae if x.mae is not None else 999)
+
+    best = next((c.model_type for c in comparison if c.is_best), None)
+    latest_job = job or session.exec(
+        select(ForecastJob)
+        .where(ForecastJob.market_id == market.id)
+        .order_by(col(ForecastJob.created_at).desc())
+    ).first()
+
+    return MarketDetail(
+        id=market.id,
+        question=market.question,
+        city_id=market.city_id,
+        city_name=city.name if city else "",
+        icao=city.icao if city else "",
+        temp_type=market.temp_type,
+        target_date=market.target_date,
+        volume=market.volume,
+        url=market.url,
+        history=history,
+        forecast_dates=pred.forecast_dates if pred else [],
+        forecast_temps=pred.forecast_temps if pred else [],
+        point_forecast_c=pred.point_forecast_c if pred else None,
+        residual_rmse=pred.residual_rmse if pred else None,
+        buckets=bucket_out,
+        model_comparison=comparison,
+        best_model=best,
+        job_status=latest_job.status if latest_job else None,
+    )
+
+
+@router.post("/markets/{market_id}/retrain", response_model=RetrainResponse)
+def retrain(market_id: int, session: Session = Depends(get_session)):
+    market = session.get(Market, market_id)
+    if not market:
+        raise HTTPException(404, "Market not found")
+    job = ForecastJob(market_id=market.id, status=JobStatus.pending)
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+    run_forecast_pipeline.delay(job.id)
+    return RetrainResponse(job_id=job.id, status="processing")
+
+
+@router.get("/jobs/{job_id}", response_model=JobOut)
+def get_job(job_id: int, session: Session = Depends(get_session)):
+    job = session.get(ForecastJob, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    return job
+
+
+@router.get("/edges/", response_model=list[EdgeOut])
+def list_edges(
+    min_edge: float | None = None,
+    limit: int = Query(30, ge=1, le=100),
+    session: Session = Depends(get_session),
+):
+    threshold = min_edge if min_edge is not None else get_settings().edge_threshold
+    edges = session.exec(select(EdgeSnapshot).order_by(col(EdgeSnapshot.generated_at).desc())).all()
+    # Deduplicate latest per market+bucket
+    seen = set()
+    out: list[EdgeOut] = []
+    for e in edges:
+        key = (e.market_id, e.bucket_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        if abs(e.edge) < threshold:
+            continue
+        market = session.get(Market, e.market_id)
+        bucket = session.get(TempBucket, e.bucket_id)
+        city = session.get(City, market.city_id) if market else None
+        if not market or not bucket:
+            continue
+        out.append(
+            EdgeOut(
+                market_id=market.id,
+                question=market.question,
+                city_name=city.name if city else "",
+                bucket_label=bucket.label,
+                model_prob=e.model_prob,
+                market_prob=e.market_prob,
+                edge=e.edge,
+                target_date=market.target_date,
+            )
+        )
+        if len(out) >= limit:
+            break
+    out.sort(key=lambda x: abs(x.edge), reverse=True)
+    return out

@@ -1,140 +1,139 @@
-# How to Run
+# TempEdge
+
+Polymarket daily **high/low temperature** forecasting. We discover active weather markets from the [Polymarket Gamma API](https://gamma-api.polymarket.com), train an ARIMA-family + Prophet bakeoff on free station history (Open-Meteo / METAR / NWS), turn the best model into bucket probabilities, and surface **edges** vs crowd odds.
+
+No paid price APIs. No Django. No auth.
+
+## Run
 
 ```bash
 docker compose up --build --watch
 ```
 
-Code changes hot-reload — no manual restarts. Django uses gunicorn `--reload`, Next runs in `dev` mode, and Celery restarts on Python file changes via Compose Watch.
+| Service | URL |
+|---|---|
+| UI | http://localhost:3000 |
+| API + OpenAPI | http://localhost:8000/docs |
+| MLflow | http://localhost:5000 |
+| Example UI (no ML) | http://localhost:3000/example |
 
-Open:
-
-- Frontend: http://localhost:3000
-- API: http://localhost:8000
-- MLflow: http://localhost:5000
-
-# Amazon Price Forecasting
-
-An on-demand product price forecasting site. Search a product by link, and the system fetches its price history, trains multiple time-series models (ARIMA family + Prophet), compares them on the same train/test split, and predicts when the next price dip is likely.
-
-**Key design:** Product searches update shared product-level models. The app keeps per-product forecasts for charting, and also trains a global dip-timing model across accumulated product histories so searches make the system smarter for everyone.
+First load: click **Sync Polymarket**, open a market, wait for the Celery job to fetch history and train (~1 min).
 
 ## Architecture
 
+```mermaid
+flowchart TB
+  subgraph clients [Clients]
+    UI[Next.js TempEdge UI]
+    Docs[OpenAPI /docs]
+  end
+
+  subgraph apiLayer [API Layer]
+    API[FastAPI]
+  end
+
+  subgraph workers [Workers]
+    Beat[Celery Beat]
+    Worker[Celery Worker]
+  end
+
+  subgraph data [Data Sources]
+    Gamma[Polymarket Gamma]
+    OM[Open-Meteo]
+    METAR[Aviation METAR]
+    NWS[NWS api.weather.gov]
+  end
+
+  subgraph store [Storage]
+    PG[(Postgres)]
+    Redis[(Redis)]
+    Artifacts[Model artifacts]
+    MLflow[(MLflow)]
+  end
+
+  UI --> API
+  Docs --> API
+  API --> PG
+  API --> Redis
+  Beat -->|sync markets| Worker
+  Worker --> Gamma
+  Worker --> OM
+  Worker --> METAR
+  Worker --> NWS
+  Worker --> PG
+  Worker --> Artifacts
+  Worker --> MLflow
+  API -->|enqueue forecast| Redis
+  Redis --> Worker
 ```
-User Search → Cache Check → [hit] Serve instantly
-                         → [miss] Celery job:
-                                    1. Fetch price history (Keepa API or demo data)
-                                    2. Fit ARIMA, SARIMA, ARIMAX, SARIMAX, Prophet (+ GARCH)
-                                    3. Log metrics to MLflow
-                                    4. Store best model → serve results
+
+### Request flow
+
+```mermaid
+sequenceDiagram
+  participant User
+  participant Next as Next.js
+  participant API as FastAPI
+  participant Celery as Celery Worker
+  participant Gamma as Polymarket Gamma
+  participant OM as Open-Meteo
+
+  User->>Next: Open markets / Sync
+  Next->>API: POST /api/sync/
+  API->>Celery: sync_polymarket_markets
+  Celery->>Gamma: GET /events
+  Celery->>API: upsert City/Market/TempBucket
+
+  User->>Next: Open market detail
+  Next->>API: GET /api/markets/{id}
+  API->>Celery: run_forecast_pipeline (if stale)
+  Celery->>OM: daily high/low history
+  Celery->>Celery: bakeoff ARIMA..Prophet
+  Celery->>Celery: bucket probs + edges
+  Next->>API: poll until complete
+  API-->>Next: history, forecast, bakeoff, edges
 ```
 
 ## Stack
 
-| Layer | Technology |
+| Layer | Choice |
 |---|---|
-| Backend | Django + Django REST Framework |
-| Background jobs | Celery + Redis |
-| Database | PostgreSQL |
-| Forecasting | pmdarima, statsmodels, Prophet, arch (GARCH) |
-| Experiment tracking | MLflow |
-| Frontend | Next.js 15 + React + Tailwind + Chart.js |
-| Hosting | Docker Compose (frontend + web + worker + db + redis + mlflow) |
+| API | FastAPI + SQLModel |
+| Jobs | Celery + Redis (+ beat) |
+| DB | PostgreSQL |
+| Tracking | MLflow |
+| ML | pmdarima, Prophet, statsmodels |
+| UI | Next.js 15 + Chart.js |
+| Weather | Open-Meteo, METAR, NWS |
+| Markets | Polymarket Gamma |
 
-## Quick Start
+## What it does
 
-No `.env` file required for the default demo setup — Docker Compose ships with sensible defaults (demo data, local model storage, in-compose Postgres/Redis/MLflow).
+1. **Discover** all active high/low temp markets from Polymarket  
+2. **Bakeoff** ARIMA / SARIMA / ARIMAX / SARIMAX / Prophet per city series  
+3. **Predict** target-day temp; map residual RMSE → °C bucket probabilities  
+4. **Compare** to Polymarket Yes prices; flag \|edge\| ≥ 8%  
 
-```bash
-docker compose up --build --watch
+## Project layout
+
+```
+backend/
+  app/           FastAPI, models, routes, Celery tasks
+  forecasting/   adapters, trainer, bucket math
+frontend/        Next.js UI
+docker-compose.yml
 ```
 
-Code changes apply automatically (Django/Next hot-reload; Celery restarts on Python edits). No `.env` file required for the default demo setup.
+## API
 
-## Data Sources
-
-| Mode | Config | Description |
+| Method | Path | Purpose |
 |---|---|---|
-| **Demo** (default) | `DATA_SOURCE=demo` | Synthetic price history — no API key needed |
-| **Keepa** | `DATA_SOURCE=keepa` + `KEEPA_API_KEY` | Legitimate Amazon price history API |
-
-Scraping Amazon directly is intentionally not implemented (ToS violation + bot detection).
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/search/` | Search products, trigger forecasting |
-| `GET` | `/api/jobs/<id>/` | Poll job status |
-| `GET` | `/api/products/<id>/forecast/` | Price history + forecast + model comparison |
-| `POST` | `/api/products/<id>/retrain/` | Force retrain all models |
-
-### Search example
-
-```bash
-curl -X POST http://localhost:8000/api/search/ \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Sony WH-1000XM5"}'
-```
-
-## Models Compared
-
-All evaluated on the same 80/20 train/test split with MAE, MAPE, and RMSE:
-
-- **ARIMA** — baseline, no seasonality
-- **SARIMA** — weekly seasonality (m=7)
-- **ARIMAX** — exogenous features (sale days, holidays, weekends)
-- **SARIMAX** — seasonal + exogenous
-- **Prophet** — multiple seasonalities + US holidays
-- **GARCH** — volatility modeling (secondary, not directly comparable)
-
-The model with the lowest MAE is flagged `is_best` and used for predictions.
-
-## Project Structure
-
-```
-config/           Django settings, Celery, URLs
-products/         Models, API views, Celery tasks, admin
-forecasting/      Model training, metrics, storage, data sources
-frontend/         Next.js React app
-```
-
-## Configuration
-
-See `.env.example` for all settings. Key variables:
-
-- `MODEL_CACHE_TTL_HOURS` — how long before retraining (default: 24)
-- `MLFLOW_TRACKING_URI` — MLflow server URL
-- `MODEL_STORAGE_BACKEND` — `local` or `s3` for model artifacts
-- `KEEPA_API_KEY` — for live Amazon price data
-
-## Development (without Docker)
-
-### Backend
-
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
-# Requires local Postgres + Redis + MLflow running
-export DATABASE_URL=postgres://forecast:forecast@localhost:5433/forecast
-python manage.py migrate
-python manage.py runserver
-
-# In separate terminals:
-celery -A config worker -l info
-mlflow server --port 5000
-```
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
-```
-
-Open http://localhost:3000 — the dev server hot-reloads against the Django API on port 8000.
+| GET | `/api/markets/` | List markets (`?temp_type=&sort=edge\|volume\|date`) |
+| GET | `/api/markets/{id}` | Detail + history + bakeoff + buckets/edges |
+| POST | `/api/markets/{id}/retrain` | Force train |
+| GET | `/api/jobs/{id}` | Job status |
+| GET | `/api/edges/` | Top disagreements |
+| POST | `/api/sync/` | Refresh Polymarket catalog |
 
 ## License
 

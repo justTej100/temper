@@ -1,69 +1,75 @@
+export type TempType = "high" | "low";
 export type JobStatus = "pending" | "fetching" | "training" | "complete" | "failed";
 
-export interface SearchResult {
-  product_id: number;
-  name: string;
-  status: "ready" | "processing" | "failed" | "timeout";
-  job_id: number | null;
+export interface MarketListItem {
+  id: number;
+  question: string;
+  city_name: string;
+  temp_type: TempType;
+  target_date: string;
+  volume: number;
+  url: string;
+  top_bucket_label: string | null;
+  top_bucket_price: number | null;
+  max_edge: number | null;
+  best_model: string | null;
 }
 
-export interface SearchResponse {
-  query: string;
-  results: SearchResult[];
+export interface Bucket {
+  id: number;
+  label: string;
+  temp_c: number | null;
+  yes_price: number;
+  model_prob: number | null;
+  edge: number | null;
+}
+
+export interface ModelComparison {
+  model_type: string;
+  mae: number | null;
+  mape: number | null;
+  rmse: number | null;
+  is_best: boolean;
+  params: Record<string, unknown>;
+}
+
+export interface MarketDetail {
+  id: number;
+  question: string;
+  city_id: number;
+  city_name: string;
+  icao: string;
+  temp_type: TempType;
+  target_date: string;
+  volume: number;
+  url: string;
+  history: { date: string; temp_c: number }[];
+  forecast_dates: string[];
+  forecast_temps: number[];
+  point_forecast_c: number | null;
+  residual_rmse: number | null;
+  buckets: Bucket[];
+  model_comparison: ModelComparison[];
+  best_model: string | null;
+  job_status: JobStatus | null;
 }
 
 export interface ForecastJob {
   id: number;
-  product: number;
-  product_name: string;
+  market_id: number;
   status: JobStatus;
   error_message: string;
   created_at: string;
   completed_at: string | null;
 }
 
-export interface ModelComparison {
-  model_type: string;
-  params: Record<string, unknown>;
-  mae: number;
-  mape: number;
-  rmse: number;
-  is_best: boolean;
-  is_comparable: boolean;
-  trained_at: string;
-}
-
-export interface PricePoint {
-  date: string;
-  price: number;
-}
-
-
-export interface DipPrediction {
-  probabilities: Record<string, number>;
-  expected_dip_date: string | null;
-  expected_dip_price: number | null;
-  confidence: "low" | "medium" | "high" | string;
-  recommendation: "buy" | "watch" | "wait" | string;
-  reason: string;
-  dip_threshold: number;
-  horizon_days: number;
-  generated_at: string;
-}
-export interface Forecast {
-  forecast_dates: string[];
-  forecast_prices: number[];
-  next_dip_date: string | null;
-  next_dip_price: number | null;
-  model_type: string;
-}
-
-export interface ProductForecast {
-  product_id: number;
-  product_name: string;
-  price_history: PricePoint[];
-  forecast: Forecast;
-  dip_prediction: DipPrediction | null;
-  model_comparison: ModelComparison[];
-  best_model: string;
+export interface EdgeOut {
+  market_id: number;
+  question: string;
+  city_name: string;
+  bucket_label: string;
+  model_prob: number;
+  market_prob: number;
+  edge: number;
+  target_date: string;
 }

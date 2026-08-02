@@ -7,16 +7,29 @@ __pycache__/
 .venv/
 venv/
 env/
-.env 
 
-# Django
-db.sqlite3
-staticfiles/
-model_artifacts/
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# FastAPI / Python backend
+backend/model_artifacts/
+*.sqlite3
+.mypy_cache/
+.ruff_cache/
+
+# Alembic / local DB dumps
+*.db
 
 # MLflow local
 mlruns/
 mlflow/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
 
 # IDE
 .idea/
@@ -39,11 +52,11 @@ build/
 htmlcov/
 .coverage
 
-# Celery
-celerybeat-schedule
-celerybeat.pid
-
 # Node / Next.js
 frontend/node_modules/
 frontend/.next/
 frontend/out/
+
+# Legacy Django leftovers (if present)
+staticfiles/
+db.sqlite3

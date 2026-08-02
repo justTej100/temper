@@ -1,32 +1,28 @@
 import type { Metadata } from "next";
-import { Header } from "@/components/Header";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PriceForecast",
-  description: "On-demand product price dip prediction",
+  title: "TempEdge",
+  description: "Polymarket daily high/low temperature forecasting vs crowd odds",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className="flex min-h-screen flex-col antialiased">
         {children}
         <footer className="mt-auto border-t border-border py-8 text-center text-sm text-muted">
           <div className="mx-auto max-w-5xl px-6">
-            <p>Models: ARIMA · SARIMA · ARIMAX · SARIMAX · Prophet · GARCH</p>
+            <p>ARIMA · SARIMA · ARIMAX · SARIMAX · Prophet — vs Polymarket weather odds</p>
             <p className="mt-1">
+              Data: Open-Meteo · METAR · NWS ·{" "}
               <a
-                href="http://localhost:5000"
-                target="_blank"
-                rel="noopener noreferrer"
+                href="https://polymarket.com/weather/high-temperature"
                 className="text-accent no-underline hover:underline"
+                target="_blank"
+                rel="noreferrer"
               >
-                MLflow Experiments
+                Polymarket
               </a>
             </p>
           </div>

@@ -39,29 +39,24 @@ services:
       - "5000:5000"
 
   web:
-    build: .
+    build: ./backend
+    working_dir: /app
     command: >
-      sh -c "python manage.py migrate &&
-             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --reload"
+      uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
-      - .:/app
+      - ./backend:/app
       - model_artifacts:/app/model_artifacts
     ports:
       - "8000:8000"
     environment: &app_env
-      DEBUG: ${DEBUG:-True}
-      SECRET_KEY: ${SECRET_KEY:-django-insecure-dev-key-change-in-production}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,web}
-      DATABASE_URL: ${DATABASE_URL:-postgres://forecast:forecast@db:5432/forecast}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://forecast:forecast@db:5432/forecast}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
-      MODEL_STORAGE_BACKEND: ${MODEL_STORAGE_BACKEND:-local}
       MODEL_STORAGE_PATH: ${MODEL_STORAGE_PATH:-/app/model_artifacts}
       MODEL_CACHE_TTL_HOURS: ${MODEL_CACHE_TTL_HOURS:-24}
-      DATA_SOURCE: ${DATA_SOURCE:-demo}
-      KEEPA_API_KEY: ${KEEPA_API_KEY:-}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      EDGE_THRESHOLD: ${EDGE_THRESHOLD:-0.08}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
     depends_on:
       db:
         condition: service_healthy
@@ -72,27 +67,22 @@ services:
     develop:
       watch:
         - action: sync
-          path: .
+          path: ./backend
           target: /app
           ignore:
-            - frontend/
-            - .git/
-            - .venv/
-            - **/__pycache__/
-            - **/node_modules/
+            - "**/__pycache__/"
             - model_artifacts/
-            - staticfiles/
-            - .next/
         - action: rebuild
-          path: requirements.txt
+          path: ./backend/requirements.txt
         - action: rebuild
-          path: Dockerfile
+          path: ./backend/Dockerfile
 
   worker:
-    build: .
-    command: celery -A config worker -l info --concurrency=2
+    build: ./backend
+    working_dir: /app
+    command: celery -A app.celery_app.celery_app worker -l info --concurrency=2
     volumes:
-      - .:/app
+      - ./backend:/app
       - model_artifacts:/app/model_artifacts
     environment:
       <<: *app_env
@@ -106,21 +96,25 @@ services:
     develop:
       watch:
         - action: sync+restart
-          path: .
+          path: ./backend
           target: /app
           ignore:
-            - frontend/
-            - .git/
-            - .venv/
-            - **/__pycache__/
-            - **/node_modules/
+            - "**/__pycache__/"
             - model_artifacts/
-            - staticfiles/
-            - .next/
         - action: rebuild
-          path: requirements.txt
-        - action: rebuild
-          path: Dockerfile
+          path: ./backend/requirements.txt
+
+  beat:
+    build: ./backend
+    working_dir: /app
+    command: celery -A app.celery_app.celery_app beat -l info
+    volumes:
+      - ./backend:/app
+    environment:
+      <<: *app_env
+    depends_on:
+      - redis
+      - worker
 
   frontend:
     build:
@@ -149,8 +143,6 @@ services:
             - .next/
         - action: rebuild
           path: ./frontend/package.json
-        - action: rebuild
-          path: ./frontend/package-lock.json
         - action: rebuild
           path: ./frontend/Dockerfile
 
