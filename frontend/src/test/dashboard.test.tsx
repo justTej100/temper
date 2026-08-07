@@ -1,3 +1,4 @@
+import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import HomePage from "@/app/page";
@@ -53,12 +54,19 @@ describe("prediction dashboard", () => {
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
+  it("explains the empty state", async () => {
+    vi.mocked(api.listMarkets).mockResolvedValueOnce([]);
+    render(<HomePage />);
+    expect(await screen.findByRole("heading", { name: "No active markets yet" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Refresh markets" }).length).toBeGreaterThan(0);
+  });
+
   it("announces live sync progress", async () => {
     vi.mocked(api.triggerSync).mockResolvedValue({ job_id: 4, status: "queued" });
     vi.mocked(api.pollJob).mockImplementation(async (_id, progress) => progress?.("training"));
     render(<HomePage />);
     await screen.findByRole("heading", { name: "Austin" });
-    fireEvent.click(screen.getByRole("button", { name: "Refresh markets" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Refresh markets" })[0]);
     await waitFor(() => expect(screen.getByText("Catalog refresh complete")).toBeInTheDocument());
   });
 });

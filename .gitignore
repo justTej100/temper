@@ -1,7 +1,8 @@
-node_modules
-frontend/node_modules
-frontend/.next
-frontend/out
+# Dependencies and generated frontend output
+node_modules/
+.next/
+out/
+*.tsbuildinfo
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -13,20 +14,40 @@ __pycache__/
 venv/
 env/
 
-# Environment
+# Environment and local credentials
 .env
-.env.local
-.env.*.local
+.env.*
 !.env.example
+.envrc
+.direnv/
+.npmrc
+.pypirc
+.netrc
+credentials*.json
+service-account*.json
+secrets*.json
+secrets*.yaml
+secrets*.yml
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
 
 # FastAPI / Python backend
 backend/model_artifacts/
+model_artifacts/
+artifacts/
+*.sqlite
 *.sqlite3
 .mypy_cache/
 .ruff_cache/
 
 # Alembic / local DB dumps
 *.db
+*.db-*
+*.sql
+*.dump
 
 # MLflow local
 mlruns/
@@ -34,11 +55,13 @@ mlflow/
 
 # Celery
 celerybeat-schedule
+celerybeat-schedule.*
 celerybeat.pid
 
 # IDE
 .idea/
 .vscode/
+.cursor/
 *.swp
 *.swo
 
@@ -54,13 +77,22 @@ build/
 
 # Testing
 .pytest_cache/
+pytest-cache-files-*/
+.tox/
+.nox/
 htmlcov/
+.coverage.*
 .coverage
+coverage.xml
+junit.xml
 
-# Node / Next.js
-frontend/node_modules/
-frontend/.next/
-frontend/out/
+# Logs and process files
+*.log
+*.pid
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # Legacy Django leftovers (if present)
 staticfiles/

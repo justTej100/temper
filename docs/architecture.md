@@ -328,16 +328,16 @@ sequenceDiagram
   Operator->>API: POST /api/sync/
   API->>DB: find active sync job
   alt active job exists
-    API-->>Operator: existing job_id; deduplicated=true
+    API-->>Operator: existing job_id, deduplicated true
   else create
     API->>DB: insert queued ForecastJob
     API->>Redis: enqueue sync_polymarket_markets
-    API-->>Operator: job_id; queued
+    API-->>Operator: job_id, queued
     Redis->>Worker: deliver task
     Worker->>DB: status=fetching
     Worker->>Gamma: paginated active high-temperature events
     Gamma-->>Worker: events, buckets, prices, resolution metadata
-    Worker->>DB: upsert cities, markets, buckets; deactivate missing markets
+    Worker->>DB: upsert cities and markets, deactivate missing markets
     Worker->>DB: status=complete or failed
   end
 ```
@@ -364,7 +364,7 @@ sequenceDiagram
   end
   Redis->>Worker: forecast task
   Worker->>OM: local-time historical daily highs
-  Worker->>DB: upsert observations; status=training/evaluating
+  Worker->>DB: upsert observations, set training/evaluating
   Worker->>Worker: rolling evaluation, select, full-history refit
   Worker->>MLflow: metrics, lineage, model artifact
   Worker->>DB: CityModel, ModelPrediction, EdgeSnapshot, complete
@@ -383,7 +383,7 @@ sequenceDiagram
 
   Operator->>UI: Refresh forecast
   UI->>API: POST /api/markets/{id}/train
-  API->>DB: validate supported market; deduplicate active job
+  API->>DB: validate market and deduplicate active job
   API->>Redis: enqueue when newly created
   API-->>UI: job_id and status
   loop until terminal state
@@ -404,7 +404,7 @@ sequenceDiagram
   participant API
 
   User->>UI: request refresh
-  UI->>UI: retain content; announce queued state
+  UI->>UI: retain content and announce queued state
   UI->>API: POST command
   alt accepted
     API-->>UI: job_id

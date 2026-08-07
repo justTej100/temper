@@ -36,8 +36,8 @@ jobs:
         image: postgres:16-alpine
         env:
           POSTGRES_USER: forecast
-          POSTGRES_PASSWORD: forecast
           POSTGRES_DB: forecast
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
@@ -54,7 +54,7 @@ jobs:
       run:
         working-directory: backend
     env:
-      DATABASE_URL: postgresql://forecast:forecast@localhost:5432/forecast
+      DATABASE_URL: postgresql://forecast@localhost:5432/forecast
       CELERY_BROKER_URL: redis://localhost:6379/0
       CELERY_RESULT_BACKEND: redis://localhost:6379/0
       MLFLOW_ENABLED: "false"
