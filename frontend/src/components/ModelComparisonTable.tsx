@@ -11,33 +11,34 @@ export function ModelComparisonTable({
   const sorted = [...models].sort((a, b) => (a.mae ?? 99) - (b.mae ?? 99));
 
   return (
-    <section className="py-6">
-      <h2 className="text-xl font-semibold">Model Bakeoff</h2>
-      <p className="mt-1 text-sm text-muted">
-        Horizon-aware rolling evaluation. Lower MAE wins.
+    <section className="model-evaluation">
+      <h3>Rolling-origin evaluation</h3>
+      <p className="section-intro">
+        Models are tested on past forecast horizons. Lower mean absolute error (MAE) ranks first.
       </p>
-      <div className="mt-4 overflow-hidden rounded-lg border border-border">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-surface-2 text-xs uppercase tracking-wide text-muted">
+      <div className="table-scroll" tabIndex={0}>
+        <table>
+          <caption className="sr-only">Backtest errors by candidate model, measured in degrees Celsius</caption>
+          <thead>
             <tr>
-              <th className="px-4 py-3">Model</th>
-              <th className="px-4 py-3">MAE</th>
-              <th className="px-4 py-3">Bias</th>
-              <th className="px-4 py-3">RMSE</th>
-              <th className="px-4 py-3" />
+              <th scope="col">Model</th>
+              <th scope="col">MAE</th>
+              <th scope="col">Bias</th>
+              <th scope="col">RMSE</th>
+              <th scope="col">Selection</th>
             </tr>
           </thead>
           <tbody>
             {sorted.map((m) => (
-              <tr key={m.model_type} className="border-t border-border">
-                <td className="px-4 py-3 font-medium uppercase">{m.model_type}</td>
-                <td className="px-4 py-3">{m.mae?.toFixed(2) ?? "—"}</td>
-                <td className="px-4 py-3">{m.bias?.toFixed(2) ?? "—"}</td>
-                <td className="px-4 py-3">{m.rmse?.toFixed(2) ?? "—"}</td>
-                <td className="px-4 py-3">
+              <tr key={m.model_type}>
+                <th scope="row">{m.model_type.replaceAll("_", " ")}</th>
+                <td>{m.mae != null ? `${m.mae.toFixed(2)}°C` : "—"}</td>
+                <td>{m.bias != null ? `${m.bias.toFixed(2)}°C` : "—"}</td>
+                <td>{m.rmse != null ? `${m.rmse.toFixed(2)}°C` : "—"}</td>
+                <td>
                   {(m.is_best || m.model_type === bestModel) && (
-                    <span className="rounded-full bg-accent px-2 py-0.5 text-xs font-bold text-black">
-                      BEST
+                    <span className="status ready">
+                      <span aria-hidden="true">✓</span> Selected
                     </span>
                   )}
                 </td>

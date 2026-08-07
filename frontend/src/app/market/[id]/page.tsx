@@ -18,6 +18,7 @@ export default function MarketPage() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("Loading market…");
   const [error, setError] = useState<string | null>(null);
+  const [jobStage, setJobStage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -29,12 +30,14 @@ export default function MarketPage() {
         ["queued", "fetching", "training", "evaluating"].includes(detail.job_status) &&
         !detail.model_comparison.length
       ) {
-        setMessage(`Job ${detail.job_status}…`);
+        setMessage(`Preparing forecast: ${detail.job_status}…`);
+        setJobStage(detail.job_status);
         // Poll via retrain status isn't available by id from detail — refetch
         for (let i = 0; i < 90; i++) {
           await new Promise((r) => setTimeout(r, 2000));
           detail = await getMarket(marketId);
-          setMessage(`Job ${detail.job_status ?? "running"}…`);
+          setMessage(`Preparing forecast: ${detail.job_status ?? "running"}…`);
+          setJobStage(detail.job_status ?? "running");
           if (
             !detail.job_status ||
             detail.job_status === "complete" ||
@@ -46,6 +49,7 @@ export default function MarketPage() {
         }
       }
       setData(detail);
+      setJobStage(detail.job_status);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
     } finally {
@@ -60,10 +64,13 @@ export default function MarketPage() {
   async function handleRetrain() {
     setLoading(true);
     setMessage("Retraining models…");
-    setData(null);
+    setError(null);
     try {
       const { job_id } = await retrainMarket(marketId);
-      await pollJob(job_id, (s) => setMessage(`Job ${s}…`));
+      await pollJob(job_id, (s) => {
+        setJobStage(s);
+        setMessage(`Forecast job: ${s}`);
+      });
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Retrain failed");
@@ -74,57 +81,97 @@ export default function MarketPage() {
   return (
     <>
       <Header />
-      <main className="mx-auto w-full max-w-5xl flex-1 px-6 pb-12">
-        <p className="pt-6">
-          <Link href="/" className="text-accent no-underline hover:underline">
-            ← Markets
+      <main className="shell page detail-page">
+        <p className="back-link-wrap">
+          <Link href="/" className="back-link">
+            <span aria-hidden="true">←</span> All forecasts
           </Link>
         </p>
 
         {error && (
-          <div className="mt-4 rounded-lg border border-error/40 bg-error/10 px-4 py-3 text-error">
-            {error}
+          <div className="notice error" role="alert">
+            <strong>Forecast unavailable.</strong>
+            <span>{error}</span>
+            <button className="text-button" onClick={load}>Try again</button>
           </div>
         )}
 
-        {loading && <LoadingSpinner message={message} />}
+        {loading && !data && <LoadingSpinner message={message} />}
         {loading && !data && (
-          <div className="mt-6">
+          <div className="loading-detail">
             <SkeletonChart />
           </div>
         )}
 
-        {!loading && data && (
+        {data && (
           <>
-            <div className="flex flex-col gap-4 py-6 sm:flex-row sm:items-start sm:justify-between">
+            <div className="detail-header">
               <div>
-                <h1 className="text-2xl font-bold sm:text-3xl">{data.question}</h1>
-                <p className="mt-2 text-sm text-muted">
-                  {data.city_name}
-                  {data.icao ? ` (${data.icao})` : ""} · {data.temp_type} · {data.target_date}
-                  {data.point_forecast_c != null &&
-                    ` · model pick ${data.point_forecast_c.toFixed(1)}°C`}
+                <p className="eyebrow">Daily high forecast</p>
+                <h1>{data.city_name}</h1>
+                <p className="lede">
+                  {new Date(`${data.target_date}T12:00:00`).toLocaleDateString(undefined, {
+                    weekday: "long", year: "numeric", month: "long", day: "numeric",
+                  })}
                 </p>
               </div>
-              <div className="flex gap-2">
+              <div className="detail-actions">
                 {data.url && (
                   <a
                     href={data.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="rounded-lg border border-border bg-surface-2 px-4 py-2 text-sm no-underline text-text"
+                    className="button secondary"
                   >
-                    Polymarket
+                    Open Polymarket <span aria-hidden="true">↗</span>
+                    <span className="sr-only"> (opens in a new tab)</span>
                   </a>
                 )}
                 <button
                   onClick={handleRetrain}
-                  className="rounded-lg border border-border bg-surface-2 px-4 py-2 text-sm"
+                  className="button primary"
+                  disabled={loading || !data.supported}
                 >
-                  Retrain
+                  {loading ? "Running…" : "Refresh forecast"}
                 </button>
               </div>
             </div>
+
+            {jobStage && jobStage !== "complete" && (
+              <div className={`notice ${jobStage === "failed" ? "error" : "info"}`} aria-live="polite">
+                <strong>{jobStage === "failed" ? "Forecast job failed" : "Forecast in progress"}</strong>
+                <span>{message}</span>
+              </div>
+            )}
+
+            {!data.supported && (
+              <div className="notice warning" role="status">
+                <strong>Comparison not supported</strong>
+                <span>{data.unsupported_reason || "The market resolution source could not be matched reliably."}</span>
+              </div>
+            )}
+
+            <section className="prediction-summary" aria-labelledby="prediction-heading">
+              <div className="primary-prediction">
+                <p className="eyebrow" id="prediction-heading">Predicted high</p>
+                <p className="temperature">{data.point_forecast_c != null ? `${data.point_forecast_c.toFixed(1)}°C` : "—"}</p>
+                <p>{data.point_forecast_c != null ? `${(data.point_forecast_c * 9 / 5 + 32).toFixed(1)}°F` : "Forecast not generated"}</p>
+              </div>
+              <dl className="summary-metrics">
+                <div>
+                  <dt>Typical forecast error</dt>
+                  <dd>{data.residual_rmse != null ? `±${data.residual_rmse.toFixed(1)}°C RMSE` : "Not available"}</dd>
+                </div>
+                <div>
+                  <dt>Most likely model bucket</dt>
+                  <dd>{[...data.buckets].sort((a, b) => (b.model_prob ?? -1) - (a.model_prob ?? -1))[0]?.label || "Not available"}</dd>
+                </div>
+                <div>
+                  <dt>Selected model</dt>
+                  <dd>{data.best_model?.replaceAll("_", " ") || "Not selected"}</dd>
+                </div>
+              </dl>
+            </section>
 
             {data.history.length > 0 ? (
               <TempChart
@@ -132,18 +179,40 @@ export default function MarketPage() {
                 forecastDates={data.forecast_dates}
                 forecastTemps={data.forecast_temps}
                 modelType={data.best_model}
+                uncertainty={data.residual_rmse}
               />
             ) : (
-              <p className="rounded-lg border border-border bg-surface p-6 text-muted">
+              <div className="empty-state">
+                <h2>No historical series yet</h2>
                 No temperature history yet — training will fetch Open-Meteo data.
-              </p>
+              </div>
             )}
 
             <BucketCompare buckets={data.buckets} />
-            <ModelComparisonTable
-              models={data.model_comparison}
-              bestModel={data.best_model}
-            />
+            <details className="details-panel">
+              <summary>Model evaluation and technical details</summary>
+              <div className="details-content">
+                <ModelComparisonTable models={data.model_comparison} bestModel={data.best_model} />
+                <dl className="metadata-list">
+                  <div><dt>Historical source</dt><dd>Open-Meteo archive daily highs</dd></div>
+                  <div><dt>Location / station</dt><dd>{data.resolution_station || data.icao || "Open-Meteo grid point"}</dd></div>
+                  <div><dt>Market resolution source</dt><dd>{data.resolution_source || "Not published"}</dd></div>
+                  <div><dt>Local timezone</dt><dd>{data.timezone || "Not available"}</dd></div>
+                  <div><dt>Training window</dt><dd>{data.history.length ? `${data.history[0].date} to ${data.history[data.history.length - 1].date}` : "Not available"}</dd></div>
+                  <div><dt>History observations</dt><dd>{data.history.length.toLocaleString()} days</dd></div>
+                </dl>
+              </div>
+            </details>
+
+            <aside className="transparency">
+              <h2>Limitations and responsible use</h2>
+              <p>
+                This time-series model uses historical daily highs only. It does not ingest weather-service
+                forecasts and may miss abrupt weather changes. The error measure summarizes past backtests,
+                not a guaranteed interval. Polymarket odds can change after this page updates. This is
+                experimental information, not financial advice.
+              </p>
+            </aside>
           </>
         )}
       </main>

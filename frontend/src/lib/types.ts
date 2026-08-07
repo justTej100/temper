@@ -19,6 +19,9 @@ export interface MarketListItem {
   top_bucket_price: number | null;
   max_edge: number | null;
   best_model: string | null;
+  point_forecast_c?: number | null;
+  forecast_status?: JobStatus | null;
+  updated_at?: string | null;
 }
 
 export interface Bucket {
@@ -64,6 +67,12 @@ export interface MarketDetail {
   model_comparison: ModelComparison[];
   best_model: string | null;
   job_status: JobStatus | null;
+  generated_at?: string | null;
+  training_start?: string | null;
+  training_end?: string | null;
+  calibration_method?: string | null;
+  calibration_sample_size?: number | null;
+  mlflow_run_id?: string | null;
 }
 
 export interface ForecastJob {

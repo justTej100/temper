@@ -12,19 +12,26 @@ export function BucketCompare({ buckets }: { buckets: Bucket[] }) {
   }
 
   return (
-    <section className="py-6">
-      <h2 className="text-xl font-semibold">Model vs Polymarket</h2>
-      <p className="mt-1 text-sm text-muted">
-        Model probability from residual-aware normal CDF over °C buckets. Edge = model − market.
+    <section className="section">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">Probability comparison</p>
+          <h2>Model and market buckets</h2>
+        </div>
+      </div>
+      <p className="section-intro">
+        “Difference” is model probability minus market probability. It is a disagreement measure,
+        not expected profit or a recommendation.
       </p>
-      <div className="mt-4 overflow-hidden rounded-lg border border-border">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-surface-2 text-xs uppercase tracking-wide text-muted">
+      <div className="table-scroll" tabIndex={0}>
+        <table>
+          <caption className="sr-only">Model probabilities compared with Polymarket probabilities by temperature bucket</caption>
+          <thead>
             <tr>
-              <th className="px-4 py-3">Bucket</th>
-              <th className="px-4 py-3">Market</th>
-              <th className="px-4 py-3">Model</th>
-              <th className="px-4 py-3">Edge</th>
+              <th scope="col">Temperature bucket</th>
+              <th scope="col">Market probability</th>
+              <th scope="col">Model probability</th>
+              <th scope="col">Difference</th>
             </tr>
           </thead>
           <tbody>
@@ -32,14 +39,20 @@ export function BucketCompare({ buckets }: { buckets: Bucket[] }) {
               const edge = b.edge;
               const hot = edge !== null && Math.abs(edge) >= 0.08;
               return (
-                <tr key={b.id} className="border-t border-border">
-                  <td className="px-4 py-3 font-medium">{b.label}</td>
-                  <td className="px-4 py-3">{pct(b.yes_price)}</td>
-                  <td className="px-4 py-3">
+                <tr key={b.id}>
+                  <th scope="row">{b.label}</th>
+                  <td>{pct(b.yes_price)}</td>
+                  <td>
                     {b.model_prob !== null ? pct(b.model_prob) : "—"}
                   </td>
-                  <td className={`px-4 py-3 ${hot ? "font-semibold text-accent" : ""}`}>
-                    {edge !== null ? `${edge >= 0 ? "+" : ""}${pct(edge)}` : "—"}
+                  <td>
+                    {edge !== null ? (
+                      <span className={hot ? "difference notable" : "difference"}>
+                        <span aria-hidden="true">{edge >= 0 ? "↑" : "↓"}</span>
+                        {edge >= 0 ? "+" : ""}{pct(edge)}
+                        {hot && <span className="sr-only">, notable disagreement</span>}
+                      </span>
+                    ) : "—"}
                   </td>
                 </tr>
               );

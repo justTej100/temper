@@ -1,0 +1,115 @@
+databases:
+  - name: temperature-predictor-postgres
+    plan: starter
+    databaseName: temperature_predictor
+    user: temperature_predictor
+    ipAllowList: []
+
+services:
+  - type: keyvalue
+    name: temperature-predictor-redis
+    plan: starter
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+
+  - type: pserv
+    name: temperature-predictor-mlflow
+    runtime: image
+    plan: starter
+    image:
+      url: ghcr.io/mlflow/mlflow:v2.14.1
+    dockerCommand: >-
+      sh -c 'mlflow server --host 0.0.0.0 --port ${PORT}
+      --backend-store-uri "${DATABASE_URL}"
+      --serve-artifacts --artifacts-destination /var/data/artifacts'
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "5000"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: temperature-predictor-postgres
+          property: connectionString
+    disk:
+      name: mlflow-data
+      mountPath: /var/data
+      sizeGB: 10
+
+  - type: web
+    name: temperature-predictor-api
+    runtime: docker
+    plan: starter
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    preDeployCommand: alembic upgrade head
+    envVars: &backend-env
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: temperature-predictor-postgres
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: keyvalue
+          name: temperature-predictor-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: keyvalue
+          name: temperature-predictor-redis
+          property: connectionString
+      - key: MLFLOW_TRACKING_URI
+        value: http://temperature-predictor-mlflow:5000
+      - key: MLFLOW_ENABLED
+        value: "true"
+      - key: MODEL_STORAGE_PATH
+        value: /tmp/model_artifacts
+      - key: CORS_ORIGINS
+        value: https://temperature-predictor-web.onrender.com
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: PORT
+        value: "10000"
+
+  - type: worker
+    name: temperature-predictor-worker
+    runtime: docker
+    plan: standard
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: celery -A app.celery_app.celery_app worker --loglevel=info --concurrency=1
+    envVars: *backend-env
+
+  - type: cron
+    name: temperature-predictor-scheduled-workflow
+    runtime: docker
+    plan: starter
+    schedule: "15 */3 * * *"
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: >-
+      python -c "from app.tasks import run_scheduled_workflow;
+      print(run_scheduled_workflow.run())"
+    envVars: *backend-env
+
+  - type: web
+    name: temperature-predictor-web
+    runtime: node
+    plan: starter
+    rootDir: frontend
+    buildCommand: npm ci && NEXT_PUBLIC_API_URL="https://${API_HOST}" npm run build
+    startCommand: npm run start -- -p $PORT
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: API_HOST
+        fromService:
+          type: web
+          name: temperature-predictor-api
+          property: host

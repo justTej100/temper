@@ -5,7 +5,9 @@ import type {
   MarketListItem,
 } from "./types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const configuredUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
+export const API_URL = (configuredUrl || "http://localhost:8000").replace(/\/+$/, "");
+export const API_DOCS_URL = `${API_URL}/docs`;
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
@@ -17,14 +19,20 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || body.error || `Request failed (${res.status})`);
+    const detail = body.detail;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : detail?.message || body.error || `Request failed (${res.status})`;
+    throw new Error(message);
   }
   return res.json();
 }
 
-export function listMarkets(params?: { sort?: string }) {
+export function listMarkets(params?: { sort?: string; limit?: number }) {
   const q = new URLSearchParams();
   if (params?.sort) q.set("sort", params.sort);
+  if (params?.limit) q.set("limit", String(params.limit));
   const suffix = q.toString() ? `?${q}` : "";
   return request<MarketListItem[]>(`/api/markets/${suffix}`);
 }
