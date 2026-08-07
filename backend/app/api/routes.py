@@ -1,6 +1,4 @@
-from datetime import datetime, timedelta
-
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlmodel import Session, col, select
 
 from app.config import get_settings
@@ -11,6 +9,7 @@ from app.models import (
     EdgeSnapshot,
     ForecastJob,
     JobStatus,
+    JobType,
     Market,
     ModelPrediction,
     Observation,
@@ -24,70 +23,77 @@ from app.schemas import (
     MarketDetail,
     MarketListItem,
     ModelComparisonOut,
-    RetrainResponse,
+    JobCreated,
 )
+from app.services import create_forecast_job
 from app.tasks import run_forecast_pipeline, sync_polymarket_markets
 
 router = APIRouter(prefix="/api")
 
 
-def _maybe_enqueue_forecast(session: Session, market: Market) -> ForecastJob | None:
+def require_admin(
+    x_admin_token: str | None = Header(default=None),
+) -> None:
     settings = get_settings()
-    cutoff = datetime.utcnow() - timedelta(hours=settings.model_cache_ttl_hours)
-    best = session.exec(
-        select(CityModel).where(
-            CityModel.city_id == market.city_id,
-            CityModel.temp_type == market.temp_type,
-            CityModel.is_best == True,  # noqa: E712
-            CityModel.trained_at >= cutoff,
+    if settings.environment == "production" and not settings.admin_token:
+        raise HTTPException(
+            503,
+            detail={
+                "code": "write_actions_disabled",
+                "message": "Administrative write actions are disabled",
+            },
         )
-    ).first()
-    pred = session.exec(
-        select(ModelPrediction)
-        .where(ModelPrediction.market_id == market.id)
-        .order_by(col(ModelPrediction.generated_at).desc())
-    ).first()
-    if best and pred and pred.generated_at >= cutoff:
-        return None
+    if settings.admin_token and x_admin_token != settings.admin_token:
+        raise HTTPException(
+            401,
+            detail={"code": "invalid_admin_token", "message": "Invalid admin token"},
+        )
 
+
+@router.post("/sync/", response_model=JobCreated, dependencies=[Depends(require_admin)])
+def trigger_sync(session: Session = Depends(get_session)):
+    """Pull latest Polymarket weather markets (also runs on Celery beat)."""
     active = session.exec(
-        select(ForecastJob).where(
-            ForecastJob.market_id == market.id,
+        select(ForecastJob)
+        .where(
+            ForecastJob.job_type == JobType.sync,
             col(ForecastJob.status).in_(
-                [JobStatus.pending, JobStatus.fetching, JobStatus.training]
+                [
+                    JobStatus.queued,
+                    JobStatus.fetching,
+                    JobStatus.training,
+                    JobStatus.evaluating,
+                ]
             ),
         )
+        .order_by(col(ForecastJob.created_at).desc())
     ).first()
     if active:
-        return active
-
-    job = ForecastJob(market_id=market.id, status=JobStatus.pending)
+        return JobCreated(
+            job_id=active.id, status=active.status, deduplicated=True
+        )
+    job = ForecastJob(job_type=JobType.sync, status=JobStatus.queued)
     session.add(job)
     session.commit()
     session.refresh(job)
-    run_forecast_pipeline.delay(job.id)
-    return job
-
-
-@router.post("/sync/")
-def trigger_sync(session: Session = Depends(get_session)):
-    """Pull latest Polymarket weather markets (also runs on Celery beat)."""
-    sync_polymarket_markets.delay()
-    return {"status": "queued"}
+    sync_polymarket_markets.delay(job.id)
+    return JobCreated(job_id=job.id, status=job.status)
 
 
 @router.get("/markets/", response_model=list[MarketListItem])
 def list_markets(
-    temp_type: TempType | None = None,
     sort: str = Query("volume", pattern="^(volume|edge|date)$"),
     limit: int = Query(50, ge=1, le=200),
     session: Session = Depends(get_session),
 ):
     markets = session.exec(
-        select(Market).where(Market.active == True).order_by(col(Market.volume).desc())  # noqa: E712
+        select(Market)
+        .where(
+            Market.active == True,  # noqa: E712
+            Market.temp_type == TempType.high,
+        )
+        .order_by(col(Market.volume).desc())
     ).all()
-    if temp_type:
-        markets = [m for m in markets if m.temp_type == temp_type]
 
     items: list[MarketListItem] = []
     for m in markets[:limit]:
@@ -101,7 +107,7 @@ def list_markets(
                 CityModel.city_id == m.city_id,
                 CityModel.temp_type == m.temp_type,
                 CityModel.is_best == True,  # noqa: E712
-            )
+            ).order_by(col(CityModel.trained_at).desc())
         ).first()
         items.append(
             MarketListItem(
@@ -132,9 +138,10 @@ def list_markets(
 def get_market(market_id: int, session: Session = Depends(get_session)):
     market = session.get(Market, market_id)
     if not market:
-        raise HTTPException(404, "Market not found")
+        raise HTTPException(
+            404, detail={"code": "market_not_found", "message": "Market not found"}
+        )
     city = session.get(City, market.city_id)
-    job = _maybe_enqueue_forecast(session, market)
 
     obs = session.exec(
         select(Observation)
@@ -143,10 +150,7 @@ def get_market(market_id: int, session: Session = Depends(get_session)):
     ).all()
     history = []
     for o in obs:
-        temp = o.high_c if market.temp_type == TempType.high else o.low_c
-        if temp is None:
-            continue
-        history.append({"date": o.observed_on.isoformat(), "temp_c": float(temp)})
+        history.append({"date": o.observed_on.isoformat(), "temp_c": float(o.high_c)})
 
     pred = session.exec(
         select(ModelPrediction)
@@ -155,10 +159,13 @@ def get_market(market_id: int, session: Session = Depends(get_session)):
     ).first()
 
     buckets = session.exec(select(TempBucket).where(TempBucket.market_id == market.id)).all()
-    edges = {
-        e.bucket_id: e
-        for e in session.exec(select(EdgeSnapshot).where(EdgeSnapshot.market_id == market.id)).all()
-    }
+    edges = {}
+    for edge in session.exec(
+        select(EdgeSnapshot)
+        .where(EdgeSnapshot.market_id == market.id)
+        .order_by(col(EdgeSnapshot.generated_at).desc())
+    ).all():
+        edges.setdefault(edge.bucket_id, edge)
     bucket_out = []
     for b in buckets:
         e = edges.get(b.id)
@@ -192,8 +199,8 @@ def get_market(market_id: int, session: Session = Depends(get_session)):
             ModelComparisonOut(
                 model_type=m.model_type,
                 mae=m.mae,
-                mape=m.mape,
                 rmse=m.rmse,
+                bias=m.bias,
                 is_best=m.is_best,
                 params=m.params or {},
             )
@@ -201,7 +208,7 @@ def get_market(market_id: int, session: Session = Depends(get_session)):
     comparison.sort(key=lambda x: x.mae if x.mae is not None else 999)
 
     best = next((c.model_type for c in comparison if c.is_best), None)
-    latest_job = job or session.exec(
+    latest_job = session.exec(
         select(ForecastJob)
         .where(ForecastJob.market_id == market.id)
         .order_by(col(ForecastJob.created_at).desc())
@@ -213,6 +220,12 @@ def get_market(market_id: int, session: Session = Depends(get_session)):
         city_id=market.city_id,
         city_name=city.name if city else "",
         icao=city.icao if city else "",
+        timezone=city.timezone if city else "",
+        data_source=city.data_source if city else "",
+        resolution_source=market.resolution_source,
+        resolution_station=market.resolution_station,
+        supported=market.supported,
+        unsupported_reason=market.unsupported_reason,
         temp_type=market.temp_type,
         target_date=market.target_date,
         volume=market.volume,
@@ -229,24 +242,64 @@ def get_market(market_id: int, session: Session = Depends(get_session)):
     )
 
 
-@router.post("/markets/{market_id}/retrain", response_model=RetrainResponse)
-def retrain(market_id: int, session: Session = Depends(get_session)):
+def _queue_forecast(market_id: int, session: Session) -> JobCreated:
     market = session.get(Market, market_id)
     if not market:
-        raise HTTPException(404, "Market not found")
-    job = ForecastJob(market_id=market.id, status=JobStatus.pending)
-    session.add(job)
-    session.commit()
-    session.refresh(job)
-    run_forecast_pipeline.delay(job.id)
-    return RetrainResponse(job_id=job.id, status="processing")
+        raise HTTPException(
+            404, detail={"code": "market_not_found", "message": "Market not found"}
+        )
+    if not market.supported:
+        raise HTTPException(
+            422,
+            detail={
+                "code": "unsupported_market",
+                "message": market.unsupported_reason,
+            },
+        )
+    job, created = create_forecast_job(session, market.id)
+    if created:
+        run_forecast_pipeline.delay(job.id)
+    return JobCreated(
+        job_id=job.id, status=job.status, deduplicated=not created
+    )
+
+
+@router.post(
+    "/markets/{market_id}/forecast",
+    response_model=JobCreated,
+    dependencies=[Depends(require_admin)],
+)
+def forecast(market_id: int, session: Session = Depends(get_session)):
+    return _queue_forecast(market_id, session)
+
+
+@router.post(
+    "/markets/{market_id}/train",
+    response_model=JobCreated,
+    dependencies=[Depends(require_admin)],
+)
+def train(market_id: int, session: Session = Depends(get_session)):
+    return _queue_forecast(market_id, session)
+
+
+@router.post(
+    "/markets/{market_id}/retrain",
+    response_model=JobCreated,
+    dependencies=[Depends(require_admin)],
+    deprecated=True,
+)
+def retrain(market_id: int, session: Session = Depends(get_session)):
+    """Compatibility alias; clients should use the explicit train action."""
+    return _queue_forecast(market_id, session)
 
 
 @router.get("/jobs/{job_id}", response_model=JobOut)
 def get_job(job_id: int, session: Session = Depends(get_session)):
     job = session.get(ForecastJob, job_id)
     if not job:
-        raise HTTPException(404, "Job not found")
+        raise HTTPException(
+            404, detail={"code": "job_not_found", "message": "Job not found"}
+        )
     return job
 
 

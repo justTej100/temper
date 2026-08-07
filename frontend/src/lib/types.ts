@@ -1,5 +1,11 @@
-export type TempType = "high" | "low";
-export type JobStatus = "pending" | "fetching" | "training" | "complete" | "failed";
+export type TempType = "high";
+export type JobStatus =
+  | "queued"
+  | "fetching"
+  | "training"
+  | "evaluating"
+  | "complete"
+  | "failed";
 
 export interface MarketListItem {
   id: number;
@@ -27,8 +33,8 @@ export interface Bucket {
 export interface ModelComparison {
   model_type: string;
   mae: number | null;
-  mape: number | null;
   rmse: number | null;
+  bias: number | null;
   is_best: boolean;
   params: Record<string, unknown>;
 }
@@ -39,6 +45,12 @@ export interface MarketDetail {
   city_id: number;
   city_name: string;
   icao: string;
+  timezone: string;
+  data_source: string;
+  resolution_source: string;
+  resolution_station: string;
+  supported: boolean;
+  unsupported_reason: string;
   temp_type: TempType;
   target_date: string;
   volume: number;
@@ -56,9 +68,12 @@ export interface MarketDetail {
 
 export interface ForecastJob {
   id: number;
-  market_id: number;
+  market_id: number | null;
+  job_type: "sync" | "forecast" | "scheduled";
   status: JobStatus;
   error_message: string;
+  attempts: number;
+  updated_at: string;
   created_at: string;
   completed_at: string | null;
 }

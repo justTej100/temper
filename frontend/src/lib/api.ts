@@ -3,7 +3,6 @@ import type {
   ForecastJob,
   MarketDetail,
   MarketListItem,
-  TempType,
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -23,9 +22,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
-export function listMarkets(params?: { temp_type?: TempType; sort?: string }) {
+export function listMarkets(params?: { sort?: string }) {
   const q = new URLSearchParams();
-  if (params?.temp_type) q.set("temp_type", params.temp_type);
   if (params?.sort) q.set("sort", params.sort);
   const suffix = q.toString() ? `?${q}` : "";
   return request<MarketListItem[]>(`/api/markets/${suffix}`);
@@ -36,7 +34,7 @@ export function getMarket(id: number) {
 }
 
 export function retrainMarket(id: number) {
-  return request<{ job_id: number; status: string }>(`/api/markets/${id}/retrain`, {
+  return request<{ job_id: number; status: string }>(`/api/markets/${id}/train`, {
     method: "POST",
   });
 }
@@ -50,7 +48,7 @@ export function listEdges() {
 }
 
 export function triggerSync() {
-  return request<{ status: string }>("/api/sync/", { method: "POST" });
+  return request<{ job_id: number; status: string }>("/api/sync/", { method: "POST" });
 }
 
 export async function pollJob(

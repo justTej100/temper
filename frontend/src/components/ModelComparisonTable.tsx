@@ -14,7 +14,7 @@ export function ModelComparisonTable({
     <section className="py-6">
       <h2 className="text-xl font-semibold">Model Bakeoff</h2>
       <p className="mt-1 text-sm text-muted">
-        Same train/test split. Lower MAE wins.
+        Horizon-aware rolling evaluation. Lower MAE wins.
       </p>
       <div className="mt-4 overflow-hidden rounded-lg border border-border">
         <table className="w-full text-left text-sm">
@@ -22,7 +22,7 @@ export function ModelComparisonTable({
             <tr>
               <th className="px-4 py-3">Model</th>
               <th className="px-4 py-3">MAE</th>
-              <th className="px-4 py-3">MAPE</th>
+              <th className="px-4 py-3">Bias</th>
               <th className="px-4 py-3">RMSE</th>
               <th className="px-4 py-3" />
             </tr>
@@ -32,7 +32,7 @@ export function ModelComparisonTable({
               <tr key={m.model_type} className="border-t border-border">
                 <td className="px-4 py-3 font-medium uppercase">{m.model_type}</td>
                 <td className="px-4 py-3">{m.mae?.toFixed(2) ?? "—"}</td>
-                <td className="px-4 py-3">{m.mape?.toFixed(1) ?? "—"}</td>
+                <td className="px-4 py-3">{m.bias?.toFixed(2) ?? "—"}</td>
                 <td className="px-4 py-3">{m.rmse?.toFixed(2) ?? "—"}</td>
                 <td className="px-4 py-3">
                   {(m.is_best || m.model_type === bestModel) && (

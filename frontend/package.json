@@ -1,5 +1,5 @@
 {
-  "name": "price-forecast-frontend",
+  "name": "temperature-predictor-frontend",
   "version": "0.1.0",
   "private": true,
   "scripts": {

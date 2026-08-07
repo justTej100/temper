@@ -1,4 +1,4 @@
-"""Known Polymarket weather cities → ICAO / coordinates."""
+"""Validated Polymarket city/station mappings used for source alignment."""
 
 STATIONS: dict[str, dict] = {
     "new york": {"name": "New York City", "icao": "KLGA", "lat": 40.7772, "lon": -73.8726, "country": "US"},
@@ -48,14 +48,79 @@ STATIONS: dict[str, dict] = {
     "chongqing": {"name": "Chongqing", "icao": "ZUCK", "lat": 29.7192, "lon": 106.6417, "country": "CN"},
     "qingdao": {"name": "Qingdao", "icao": "ZSQD", "lat": 36.2661, "lon": 120.3744, "country": "CN"},
     "lucknow": {"name": "Lucknow", "icao": "VILK", "lat": 26.7606, "lon": 80.8893, "country": "IN"},
+    "austin": {"name": "Austin", "icao": "KAUS", "lat": 30.1945, "lon": -97.6699, "country": "US"},
+    "boston": {"name": "Boston", "icao": "KBOS", "lat": 42.3656, "lon": -71.0096, "country": "US"},
+    "phoenix": {"name": "Phoenix", "icao": "KPHX", "lat": 33.4342, "lon": -112.0116, "country": "US"},
+    "washington dc": {"name": "Washington, DC", "icao": "KDCA", "lat": 38.8512, "lon": -77.0402, "country": "US"},
+    "sao paulo": {"name": "São Paulo", "icao": "SBGR", "lat": -23.4356, "lon": -46.4731, "country": "BR"},
+    "sydney": {"name": "Sydney", "icao": "YSSY", "lat": -33.9399, "lon": 151.1753, "country": "AU"},
+    "melbourne": {"name": "Melbourne", "icao": "YMML", "lat": -37.6690, "lon": 144.8410, "country": "AU"},
+    "berlin": {"name": "Berlin", "icao": "EDDB", "lat": 52.3667, "lon": 13.5033, "country": "DE"},
+    "rome": {"name": "Rome", "icao": "LIRF", "lat": 41.8003, "lon": 12.2389, "country": "IT"},
+    "mexico city": {"name": "Mexico City", "icao": "MMMX", "lat": 19.4361, "lon": -99.0719, "country": "MX"},
+    "delhi": {"name": "Delhi", "icao": "VIDP", "lat": 28.5562, "lon": 77.1000, "country": "IN"},
+}
+
+TIMEZONES = {
+    "US": "America/New_York",
+    "GB": "Europe/London",
+    "FR": "Europe/Paris",
+    "JP": "Asia/Tokyo",
+    "KR": "Asia/Seoul",
+    "HK": "Asia/Hong_Kong",
+    "CN": "Asia/Shanghai",
+    "SG": "Asia/Singapore",
+    "ES": "Europe/Madrid",
+    "IT": "Europe/Rome",
+    "DE": "Europe/Berlin",
+    "NL": "Europe/Amsterdam",
+    "CA": "America/Toronto",
+    "AR": "America/Argentina/Buenos_Aires",
+    "NZ": "Pacific/Auckland",
+    "MY": "Asia/Kuala_Lumpur",
+    "TW": "Asia/Taipei",
+    "TR": "Europe/Istanbul",
+    "RU": "Europe/Moscow",
+    "IL": "Asia/Jerusalem",
+    "FI": "Europe/Helsinki",
+    "PL": "Europe/Warsaw",
+    "ZA": "Africa/Johannesburg",
+    "PK": "Asia/Karachi",
+    "SA": "Asia/Riyadh",
+    "PH": "Asia/Manila",
+    "IN": "Asia/Kolkata",
+    "BR": "America/Sao_Paulo",
+    "AU": "Australia/Sydney",
+    "MX": "America/Mexico_City",
+}
+
+US_TIMEZONES = {
+    "Chicago": "America/Chicago",
+    "Dallas": "America/Chicago",
+    "Denver": "America/Denver",
+    "Houston": "America/Chicago",
+    "Los Angeles": "America/Los_Angeles",
+    "Phoenix": "America/Phoenix",
+    "Seattle": "America/Los_Angeles",
 }
 
 
 def resolve_city(raw_name: str) -> dict | None:
-    key = raw_name.strip().lower()
+    key = raw_name.strip().lower().replace("washington, d.c.", "washington dc")
     if key in STATIONS:
-        return STATIONS[key]
-    for k, v in STATIONS.items():
-        if k in key or key in k:
-            return v
-    return None
+        station = dict(STATIONS[key])
+    else:
+        aliases = [
+            (alias, value)
+            for alias, value in STATIONS.items()
+            if key.startswith(f"{alias} (") or key == value["name"].lower()
+        ]
+        if len(aliases) != 1:
+            return None
+        station = dict(aliases[0][1])
+    station["timezone"] = US_TIMEZONES.get(
+        station["name"], TIMEZONES.get(station["country"], "")
+    )
+    station["resolution_source"] = "curated-polymarket-station"
+    station["resolution_verified"] = bool(station["icao"] and station["timezone"])
+    return station

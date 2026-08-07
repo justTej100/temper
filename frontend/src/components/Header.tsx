@@ -6,7 +6,7 @@ export function Header({ tagline }: { tagline?: string }) {
       <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
         <div>
           <Link href="/" className="text-2xl font-bold text-text no-underline">
-            Temp<span className="text-accent">Edge</span>
+            Temperature <span className="text-accent">Predictor</span>
           </Link>
           {tagline && <p className="mt-1 text-sm text-muted">{tagline}</p>}
         </div>

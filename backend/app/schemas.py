@@ -3,7 +3,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from app.models import JobStatus, TempType
+from app.models import JobStatus, JobType, TempType
 
 
 class BucketOut(BaseModel):
@@ -20,8 +20,8 @@ class BucketOut(BaseModel):
 class ModelComparisonOut(BaseModel):
     model_type: str
     mae: Optional[float]
-    mape: Optional[float]
     rmse: Optional[float]
+    bias: Optional[float]
     is_best: bool
     params: dict = {}
 
@@ -48,6 +48,12 @@ class MarketDetail(BaseModel):
     city_id: int
     city_name: str
     icao: str
+    timezone: str
+    data_source: str
+    resolution_source: str
+    resolution_station: str
+    supported: bool
+    unsupported_reason: str
     temp_type: TempType
     target_date: date
     volume: float
@@ -65,9 +71,12 @@ class MarketDetail(BaseModel):
 
 class JobOut(BaseModel):
     id: int
-    market_id: int
+    market_id: Optional[int]
+    job_type: JobType
     status: JobStatus
     error_message: str
+    attempts: int
+    updated_at: datetime
     created_at: datetime
     completed_at: Optional[datetime]
 
@@ -85,6 +94,11 @@ class EdgeOut(BaseModel):
     target_date: date
 
 
-class RetrainResponse(BaseModel):
+class JobCreated(BaseModel):
     job_id: int
-    status: str
+    status: JobStatus
+    deduplicated: bool = False
+
+
+# Kept as a schema alias for Phase 1 frontend compatibility.
+RetrainResponse = JobCreated

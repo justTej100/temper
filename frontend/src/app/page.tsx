@@ -4,15 +4,14 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Header } from "@/components/Header";
 import { LoadingSpinner } from "@/components/Loading";
-import { listEdges, listMarkets, triggerSync } from "@/lib/api";
-import type { EdgeOut, MarketListItem, TempType } from "@/lib/types";
+import { listEdges, listMarkets, pollJob, triggerSync } from "@/lib/api";
+import type { EdgeOut, MarketListItem } from "@/lib/types";
 
 function pct(v: number) {
   return `${Math.round(v * 100)}%`;
 }
 
 export default function HomePage() {
-  const [tempType, setTempType] = useState<TempType | "all">("high");
   const [sort, setSort] = useState("edge");
   const [markets, setMarkets] = useState<MarketListItem[]>([]);
   const [edges, setEdges] = useState<EdgeOut[]>([]);
@@ -25,10 +24,7 @@ export default function HomePage() {
     setError(null);
     try {
       const [m, e] = await Promise.all([
-        listMarkets({
-          temp_type: tempType === "all" ? undefined : tempType,
-          sort,
-        }),
+        listMarkets({ sort }),
         listEdges(),
       ]);
       setMarkets(m);
@@ -38,7 +34,7 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
-  }, [tempType, sort]);
+  }, [sort]);
 
   useEffect(() => {
     load();
@@ -47,8 +43,8 @@ export default function HomePage() {
   async function handleSync() {
     setSyncing(true);
     try {
-      await triggerSync();
-      await new Promise((r) => setTimeout(r, 3000));
+      const { job_id } = await triggerSync();
+      await pollJob(job_id);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sync failed");
@@ -59,7 +55,7 @@ export default function HomePage() {
 
   return (
     <>
-      <Header tagline="Model bakeoff vs Polymarket high/low temp odds" />
+      <Header tagline="Daily-high model forecasts vs Polymarket odds" />
       <main className="mx-auto w-full max-w-5xl flex-1 px-6 pb-12">
         <section className="py-12">
           <h1 className="text-4xl font-bold tracking-tight">Daily temperature edges</h1>
@@ -68,19 +64,6 @@ export default function HomePage() {
             free station history, and highlight where our probabilities disagree with the crowd.
           </p>
           <div className="mt-6 flex flex-wrap items-center gap-3">
-            <div className="flex rounded-lg border border-border overflow-hidden">
-              {(["high", "low", "all"] as const).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setTempType(t)}
-                  className={`px-4 py-2 text-sm capitalize ${
-                    tempType === t ? "bg-accent text-black font-semibold" : "bg-surface text-muted"
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value)}

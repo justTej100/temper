@@ -1,8 +1,9 @@
-"""Open-Meteo historical + forecast temperature data."""
+"""Open-Meteo local-day historical high-temperature observations."""
 
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date, timedelta
 
 import httpx
@@ -13,8 +14,31 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 
-def fetch_daily_history(lat: float, lon: float, days: int | None = None) -> pd.DataFrame:
+def _get_json(url: str, params: dict) -> dict:
     settings = get_settings()
+    last_error: Exception | None = None
+    with httpx.Client(timeout=settings.http_timeout_seconds) as client:
+        for attempt in range(settings.http_max_retries):
+            try:
+                response = client.get(url, params=params)
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, dict):
+                    raise ValueError("Expected a JSON object")
+                return payload
+            except (httpx.HTTPError, ValueError) as exc:
+                last_error = exc
+                if attempt + 1 < settings.http_max_retries:
+                    time.sleep(min(2 ** attempt, 4))
+    raise RuntimeError(f"Open-Meteo request failed after bounded retries: {last_error}")
+
+
+def fetch_daily_history(
+    lat: float, lon: float, timezone: str, days: int | None = None
+) -> pd.DataFrame:
+    settings = get_settings()
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180) or not timezone:
+        raise ValueError("Valid coordinates and an IANA timezone are required")
     days = days or settings.history_days
     end = date.today() - timedelta(days=1)
     start = end - timedelta(days=days)
@@ -24,64 +48,72 @@ def fetch_daily_history(lat: float, lon: float, days: int | None = None) -> pd.D
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
         "daily": "temperature_2m_max,temperature_2m_min",
-        "timezone": "UTC",
+        "temperature_unit": "celsius",
+        "timezone": timezone,
     }
-    with httpx.Client(timeout=60.0) as client:
-        resp = client.get(settings.open_meteo_url, params=params)
-        resp.raise_for_status()
-        data = resp.json()
+    data = _get_json(settings.open_meteo_url, params)
+    units = data.get("daily_units") or {}
+    if units.get("temperature_2m_max") not in {"°C", "C", "celsius"}:
+        raise ValueError("Open-Meteo returned unexpected temperature units")
+    returned_timezone = str(data.get("timezone") or "")
+    if returned_timezone and returned_timezone != timezone:
+        raise ValueError(
+            f"Open-Meteo timezone mismatch: expected {timezone}, got {returned_timezone}"
+        )
     daily = data.get("daily") or {}
     dates = daily.get("time") or []
     highs = daily.get("temperature_2m_max") or []
-    lows = daily.get("temperature_2m_min") or []
+    if len(dates) != len(highs):
+        raise ValueError("Open-Meteo returned misaligned daily data")
     rows = []
     for i, d in enumerate(dates):
+        value = highs[i]
+        if value is None:
+            continue
+        value = float(value)
+        if not -90.0 <= value <= 65.0:
+            raise ValueError(f"Implausible daily high temperature: {value}")
         rows.append({
             "observed_on": date.fromisoformat(d),
-            "high_c": highs[i] if i < len(highs) else None,
-            "low_c": lows[i] if i < len(lows) else None,
+            "high_c": value,
         })
-    return pd.DataFrame(rows)
-
-
-def fetch_forecast_high_low(lat: float, lon: float, days: int = 7) -> pd.DataFrame:
-    settings = get_settings()
-    params = {
-        "latitude": lat,
-        "longitude": lon,
-        "daily": "temperature_2m_max,temperature_2m_min",
-        "forecast_days": days,
-        "timezone": "UTC",
-    }
-    with httpx.Client(timeout=30.0) as client:
-        resp = client.get(settings.open_meteo_forecast_url, params=params)
-        resp.raise_for_status()
-        data = resp.json()
-    daily = data.get("daily") or {}
-    return pd.DataFrame({
-        "date": daily.get("time") or [],
-        "high_c": daily.get("temperature_2m_max") or [],
-        "low_c": daily.get("temperature_2m_min") or [],
-    })
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        raise ValueError("Open-Meteo returned no historical observations")
+    expected = pd.date_range(frame.observed_on.min(), frame.observed_on.max(), freq="D")
+    missing = len(expected) - len(frame)
+    if missing > settings.max_missing_days:
+        raise ValueError(f"Historical series has {missing} missing local dates")
+    return frame
 
 
 def geocode_city(name: str) -> dict | None:
-    """Fallback geocoding via Open-Meteo geocoding API."""
-    with httpx.Client(timeout=20.0) as client:
-        resp = client.get(
-            "https://geocoding-api.open-meteo.com/v1/search",
-            params={"name": name, "count": 1},
-        )
-        if resp.status_code != 200:
-            return None
-        results = (resp.json() or {}).get("results") or []
-        if not results:
-            return None
-        hit = results[0]
-        return {
-            "name": hit.get("name") or name,
-            "lat": float(hit["latitude"]),
-            "lon": float(hit["longitude"]),
-            "country": hit.get("country_code") or "",
-            "icao": "",
-        }
+    """Return a validated but explicitly unaligned geocoding fallback."""
+    settings = get_settings()
+    payload = _get_json(
+        settings.geocoding_api_url,
+        {"name": name, "count": 5, "language": "en", "format": "json"},
+    )
+    results = payload.get("results") or []
+    normalized = name.casefold().strip()
+    exact = [
+        hit for hit in results if str(hit.get("name") or "").casefold() == normalized
+    ]
+    if len(exact) != 1:
+        return None
+    hit = exact[0]
+    timezone = str(hit.get("timezone") or "")
+    lat = float(hit["latitude"])
+    lon = float(hit["longitude"])
+    if not timezone or not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    return {
+        "name": hit.get("name") or name,
+        "lat": lat,
+        "lon": lon,
+        "timezone": timezone,
+        "country": hit.get("country_code") or "",
+        "icao": "",
+        "resolution_source": "open-meteo-geocoding",
+        "resolution_verified": False,
+    }

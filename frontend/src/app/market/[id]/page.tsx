@@ -26,7 +26,7 @@ export default function MarketPage() {
       let detail = await getMarket(marketId);
       if (
         detail.job_status &&
-        ["pending", "fetching", "training"].includes(detail.job_status) &&
+        ["queued", "fetching", "training", "evaluating"].includes(detail.job_status) &&
         !detail.model_comparison.length
       ) {
         setMessage(`Job ${detail.job_status}…`);
