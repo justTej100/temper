@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlmodel import Session, col, select
 
@@ -25,7 +25,7 @@ def sync_polymarket_markets(self, job_id: int):
         try:
             count = sync_markets(session)
             job.status = JobStatus.complete
-            job.completed_at = job.updated_at = datetime.utcnow()
+            job.completed_at = job.updated_at = datetime.now(UTC)
             session.add(job)
             session.commit()
             logger.info("Synced %s high-temperature markets", count)
@@ -33,7 +33,7 @@ def sync_polymarket_markets(self, job_id: int):
         except Exception as exc:
             job.status = JobStatus.failed
             job.error_message = str(exc)
-            job.completed_at = job.updated_at = datetime.utcnow()
+            job.completed_at = job.updated_at = datetime.now(UTC)
             session.add(job)
             session.commit()
             raise
@@ -76,8 +76,8 @@ def run_scheduled_workflow():
             market_ids = session.exec(
                 select(Market.id)
                 .where(
-                    Market.active == True,  # noqa: E712
-                    Market.supported == True,  # noqa: E712
+                    Market.active == True,
+                    Market.supported == True,
                 )
                 .order_by(col(Market.target_date))
             ).all()
@@ -88,14 +88,14 @@ def run_scheduled_workflow():
                     run_forecast_pipeline.delay(job.id)
                     queued += 1
             sync_job.status = JobStatus.complete
-            sync_job.completed_at = datetime.utcnow()
+            sync_job.completed_at = datetime.now(UTC)
             session.add(sync_job)
             session.commit()
             return {"synced": count, "queued": queued}
         except Exception as exc:
             sync_job.status = JobStatus.failed
             sync_job.error_message = str(exc)
-            sync_job.completed_at = datetime.utcnow()
+            sync_job.completed_at = datetime.now(UTC)
             session.add(sync_job)
             session.commit()
             raise

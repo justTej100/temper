@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import hashlib
-import json
+import importlib
 import logging
 import pickle
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -30,8 +31,9 @@ try:
 except ImportError:  # pragma: no cover - optional heavyweight dependency
     Prophet = None
 
+mlflow: Any
 try:
-    import mlflow
+    mlflow = importlib.import_module("mlflow")
 except ImportError:  # pragma: no cover - local operation remains supported
     mlflow = None
 
@@ -163,12 +165,15 @@ def _fit_prophet(series: pd.Series) -> object:
 
 
 def _predict(model: object, model_type: str, periods: int) -> np.ndarray:
+    predictor = cast(Any, model)
     if model_type in {"last_value", "seasonal_naive"}:
-        return np.asarray(model.predict(periods), dtype=float)
+        return np.asarray(predictor.predict(periods), dtype=float)
     if model_type == "prophet":
-        future = model.make_future_dataframe(periods=periods, include_history=False)
-        return np.asarray(model.predict(future)["yhat"], dtype=float)
-    return np.asarray(model.predict(n_periods=periods), dtype=float)
+        future = predictor.make_future_dataframe(
+            periods=periods, include_history=False
+        )
+        return np.asarray(predictor.predict(future)["yhat"], dtype=float)
+    return np.asarray(predictor.predict(n_periods=periods), dtype=float)
 
 
 def _evaluate_candidate(
@@ -257,7 +262,7 @@ def _log_selected_model(
                 mlflow.log_artifact(str(model_path), artifact_path="model")
             result.mlflow_run_id = run.info.run_id
             result.artifact_uri = f"{run.info.artifact_uri}/model/model.pkl"
-    except Exception as exc:  # MLflow must not remove the local baseline fallback
+    except Exception as exc:  # noqa: BLE001 - tracking must not break forecasting
         logger.warning("MLflow tracking failed: %s", exc)
 
 
@@ -328,7 +333,7 @@ def train_temperature_models(
             output.results.append(
                 _evaluate_candidate(name, fitter, clean, splits)
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - isolate optional model failures
             output.candidate_failures[name] = str(exc)
             logger.warning("Candidate %s failed: %s", name, exc)
 
@@ -346,7 +351,7 @@ def train_temperature_models(
             }
         )
     elif output.best_model.model_type == "seasonal_naive":
-        output.best_model.params["period"] = fitted.period
+        output.best_model.params["period"] = cast(Any, fitted).period
     elif output.best_model.model_type == "prophet":
         output.best_model.params["yearly_seasonality"] = len(clean) >= 730
     output.forecast = pd.Series(

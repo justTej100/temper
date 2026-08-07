@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from math import erf, sqrt
-from typing import Iterable
 
 import numpy as np
 
@@ -37,7 +37,10 @@ def bucket_probabilities(
     discrete.sort(key=lambda b: b["temp_c"])
 
     probs: dict[str, float] = {}
-    errors = np.asarray(list(calibration_errors or []), dtype=float)
+    errors = np.asarray(
+        list(calibration_errors) if calibration_errors is not None else [],
+        dtype=float,
+    )
     errors = errors[np.isfinite(errors)]
     samples = point_c + errors if len(errors) >= 20 else None
 

@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlmodel import Session, col, select
 
@@ -19,20 +21,27 @@ from app.models import (
 from app.schemas import (
     BucketOut,
     EdgeOut,
+    JobCreated,
     JobOut,
     MarketDetail,
     MarketListItem,
     ModelComparisonOut,
-    JobCreated,
 )
 from app.services import create_forecast_job
 from app.tasks import run_forecast_pipeline, sync_polymarket_markets
 
 router = APIRouter(prefix="/api")
+SessionDep = Annotated[Session, Depends(get_session)]
+
+
+def _persisted_id(value: int | None) -> int:
+    if value is None:
+        raise RuntimeError("Persisted entity is missing its primary key")
+    return value
 
 
 def require_admin(
-    x_admin_token: str | None = Header(default=None),
+    x_admin_token: Annotated[str | None, Header()] = None,
 ) -> None:
     settings = get_settings()
     if settings.environment == "production" and not settings.admin_token:
@@ -51,7 +60,7 @@ def require_admin(
 
 
 @router.post("/sync/", response_model=JobCreated, dependencies=[Depends(require_admin)])
-def trigger_sync(session: Session = Depends(get_session)):
+def trigger_sync(session: SessionDep):
     """Pull latest Polymarket weather markets (also runs on Celery beat)."""
     active = session.exec(
         select(ForecastJob)
@@ -70,26 +79,29 @@ def trigger_sync(session: Session = Depends(get_session)):
     ).first()
     if active:
         return JobCreated(
-            job_id=active.id, status=active.status, deduplicated=True
+            job_id=_persisted_id(active.id),
+            status=active.status,
+            deduplicated=True,
         )
     job = ForecastJob(job_type=JobType.sync, status=JobStatus.queued)
     session.add(job)
     session.commit()
     session.refresh(job)
-    sync_polymarket_markets.delay(job.id)
-    return JobCreated(job_id=job.id, status=job.status)
+    job_id = _persisted_id(job.id)
+    sync_polymarket_markets.delay(job_id)
+    return JobCreated(job_id=job_id, status=job.status)
 
 
 @router.get("/markets/", response_model=list[MarketListItem])
 def list_markets(
+    session: SessionDep,
     sort: str = Query("volume", pattern="^(volume|edge|date)$"),
     limit: int = Query(50, ge=1, le=200),
-    session: Session = Depends(get_session),
 ):
     markets = session.exec(
         select(Market)
         .where(
-            Market.active == True,  # noqa: E712
+            Market.active == True,
             Market.temp_type == TempType.high,
         )
         .order_by(col(Market.volume).desc())
@@ -106,12 +118,12 @@ def list_markets(
             select(CityModel).where(
                 CityModel.city_id == m.city_id,
                 CityModel.temp_type == m.temp_type,
-                CityModel.is_best == True,  # noqa: E712
+                CityModel.is_best == True,
             ).order_by(col(CityModel.trained_at).desc())
         ).first()
         items.append(
             MarketListItem(
-                id=m.id,
+                id=_persisted_id(m.id),
                 question=m.question,
                 city_name=city.name if city else "",
                 temp_type=m.temp_type,
@@ -135,7 +147,7 @@ def list_markets(
 
 
 @router.get("/markets/{market_id}", response_model=MarketDetail)
-def get_market(market_id: int, session: Session = Depends(get_session)):
+def get_market(market_id: int, session: SessionDep):
     market = session.get(Market, market_id)
     if not market:
         raise HTTPException(
@@ -159,7 +171,7 @@ def get_market(market_id: int, session: Session = Depends(get_session)):
     ).first()
 
     buckets = session.exec(select(TempBucket).where(TempBucket.market_id == market.id)).all()
-    edges = {}
+    edges: dict[int, EdgeSnapshot] = {}
     for edge in session.exec(
         select(EdgeSnapshot)
         .where(EdgeSnapshot.market_id == market.id)
@@ -168,13 +180,14 @@ def get_market(market_id: int, session: Session = Depends(get_session)):
         edges.setdefault(edge.bucket_id, edge)
     bucket_out = []
     for b in buckets:
-        e = edges.get(b.id)
+        bucket_id = _persisted_id(b.id)
+        e = edges.get(bucket_id)
         model_p = (pred.bucket_probs or {}).get(b.label) if pred else None
         if model_p is None and e:
             model_p = e.model_prob
         bucket_out.append(
             BucketOut(
-                id=b.id,
+                id=bucket_id,
                 label=b.label,
                 temp_c=b.temp_c,
                 yes_price=b.yes_price,
@@ -215,7 +228,7 @@ def get_market(market_id: int, session: Session = Depends(get_session)):
     ).first()
 
     return MarketDetail(
-        id=market.id,
+        id=_persisted_id(market.id),
         question=market.question,
         city_id=market.city_id,
         city_name=city.name if city else "",
@@ -256,11 +269,12 @@ def _queue_forecast(market_id: int, session: Session) -> JobCreated:
                 "message": market.unsupported_reason,
             },
         )
-    job, created = create_forecast_job(session, market.id)
+    job, created = create_forecast_job(session, _persisted_id(market.id))
+    job_id = _persisted_id(job.id)
     if created:
-        run_forecast_pipeline.delay(job.id)
+        run_forecast_pipeline.delay(job_id)
     return JobCreated(
-        job_id=job.id, status=job.status, deduplicated=not created
+        job_id=job_id, status=job.status, deduplicated=not created
     )
 
 
@@ -269,7 +283,7 @@ def _queue_forecast(market_id: int, session: Session) -> JobCreated:
     response_model=JobCreated,
     dependencies=[Depends(require_admin)],
 )
-def forecast(market_id: int, session: Session = Depends(get_session)):
+def forecast(market_id: int, session: SessionDep):
     return _queue_forecast(market_id, session)
 
 
@@ -278,7 +292,7 @@ def forecast(market_id: int, session: Session = Depends(get_session)):
     response_model=JobCreated,
     dependencies=[Depends(require_admin)],
 )
-def train(market_id: int, session: Session = Depends(get_session)):
+def train(market_id: int, session: SessionDep):
     return _queue_forecast(market_id, session)
 
 
@@ -288,13 +302,13 @@ def train(market_id: int, session: Session = Depends(get_session)):
     dependencies=[Depends(require_admin)],
     deprecated=True,
 )
-def retrain(market_id: int, session: Session = Depends(get_session)):
+def retrain(market_id: int, session: SessionDep):
     """Compatibility alias; clients should use the explicit train action."""
     return _queue_forecast(market_id, session)
 
 
 @router.get("/jobs/{job_id}", response_model=JobOut)
-def get_job(job_id: int, session: Session = Depends(get_session)):
+def get_job(job_id: int, session: SessionDep):
     job = session.get(ForecastJob, job_id)
     if not job:
         raise HTTPException(
@@ -305,9 +319,9 @@ def get_job(job_id: int, session: Session = Depends(get_session)):
 
 @router.get("/edges/", response_model=list[EdgeOut])
 def list_edges(
+    session: SessionDep,
     min_edge: float | None = None,
     limit: int = Query(30, ge=1, le=100),
-    session: Session = Depends(get_session),
 ):
     threshold = min_edge if min_edge is not None else get_settings().edge_threshold
     edges = session.exec(select(EdgeSnapshot).order_by(col(EdgeSnapshot.generated_at).desc())).all()
@@ -328,7 +342,7 @@ def list_edges(
             continue
         out.append(
             EdgeOut(
-                market_id=market.id,
+                market_id=_persisted_id(market.id),
                 question=market.question,
                 city_name=city.name if city else "",
                 bucket_label=bucket.label,

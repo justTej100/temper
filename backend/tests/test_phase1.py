@@ -8,14 +8,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
+from app import services
 from app.db import get_session
 from app.main import app
 from app.models import City, ForecastJob, Market, TempBucket
-from app import services
+from forecasting import trainer
 from forecasting.buckets import bucket_probabilities
 from forecasting.data_sources import open_meteo
 from forecasting.data_sources.polymarket import parse_bucket_label, parse_title
-from forecasting import trainer
 
 
 def test_title_parser_is_high_only_and_rolls_year() -> None:

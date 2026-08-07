@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import date, timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import httpx
 import pandas as pd
@@ -24,9 +25,9 @@ def _get_json(url: str, params: dict) -> dict:
                 response.raise_for_status()
                 payload = response.json()
                 if not isinstance(payload, dict):
-                    raise ValueError("Expected a JSON object")
+                    raise TypeError("Expected a JSON object")
                 return payload
-            except (httpx.HTTPError, ValueError) as exc:
+            except (httpx.HTTPError, TypeError, ValueError) as exc:
                 last_error = exc
                 if attempt + 1 < settings.http_max_retries:
                     time.sleep(min(2 ** attempt, 4))
@@ -40,7 +41,7 @@ def fetch_daily_history(
     if not (-90 <= lat <= 90 and -180 <= lon <= 180) or not timezone:
         raise ValueError("Valid coordinates and an IANA timezone are required")
     days = days or settings.history_days
-    end = date.today() - timedelta(days=1)
+    end = datetime.now(ZoneInfo(timezone)).date() - timedelta(days=1)
     start = end - timedelta(days=days)
     params = {
         "latitude": lat,
@@ -74,7 +75,7 @@ def fetch_daily_history(
         if not -90.0 <= value <= 65.0:
             raise ValueError(f"Implausible daily high temperature: {value}")
         rows.append({
-            "observed_on": date.fromisoformat(d),
+            "observed_on": datetime.fromisoformat(d).date(),
             "high_c": value,
         })
     frame = pd.DataFrame(rows)

@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.routes import router
 from app.config import get_settings
@@ -90,7 +91,7 @@ def ready():
     try:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
-    except Exception as exc:
+    except SQLAlchemyError as exc:
         failures["postgresql"] = str(exc)
     try:
         client = redis.Redis.from_url(
@@ -99,7 +100,7 @@ def ready():
             socket_timeout=2,
         )
         client.ping()
-    except Exception as exc:
+    except redis.exceptions.RedisError as exc:
         failures["redis"] = str(exc)
     if failures:
         return JSONResponse(

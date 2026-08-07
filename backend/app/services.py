@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import pickle
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -52,9 +52,9 @@ def _set_job(
 ) -> None:
     job.status = status
     job.error_message = error
-    job.updated_at = datetime.utcnow()
+    job.updated_at = datetime.now(UTC)
     if complete:
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(UTC)
     session.add(job)
     session.commit()
 
@@ -92,7 +92,7 @@ def create_forecast_job(session: Session, market_id: int) -> tuple[ForecastJob, 
 def sync_markets(session: Session) -> int:
     events = fetch_weather_events()
     synced_event_ids: set[str] = set()
-    synced_at = datetime.utcnow()
+    synced_at = datetime.now(UTC)
     for event in events:
         station = dict(event["station"])
         if station.get("lat") is None or station.get("lon") is None:
@@ -135,6 +135,7 @@ def sync_markets(session: Session) -> int:
             city.timezone = station["timezone"]
             city.resolution_source = station.get("resolution_source") or ""
             city.resolution_verified = bool(station.get("resolution_verified"))
+        assert city.id is not None
 
         market = session.exec(
             select(Market).where(
@@ -163,6 +164,7 @@ def sync_markets(session: Session) -> int:
         market.last_synced_at = synced_at
         session.add(market)
         session.flush()
+        assert market.id is not None
 
         current_bucket_ids: set[int] = set()
         for data in event["buckets"]:
@@ -188,12 +190,13 @@ def sync_markets(session: Session) -> int:
             bucket.updated_at = synced_at
             session.add(bucket)
             session.flush()
+            assert bucket.id is not None
             current_bucket_ids.add(bucket.id)
 
         stale_buckets = session.exec(
             select(TempBucket).where(
                 TempBucket.market_id == market.id,
-                TempBucket.active == True,  # noqa: E712
+                TempBucket.active == True,
             )
         ).all()
         for bucket in stale_buckets:
@@ -204,7 +207,7 @@ def sync_markets(session: Session) -> int:
 
     if synced_event_ids:
         active_markets = session.exec(
-            select(Market).where(Market.active == True)  # noqa: E712
+            select(Market).where(Market.active == True)
         ).all()
         for market in active_markets:
             if market.polymarket_event_id not in synced_event_ids:
@@ -256,7 +259,7 @@ def _history(session: Session, city_id: int) -> pd.Series:
 def _latest_reusable_model(
     session: Session, city_id: int, last_observed_on
 ) -> CityModel | None:
-    cutoff = datetime.utcnow() - timedelta(
+    cutoff = datetime.now(UTC) - timedelta(
         hours=get_settings().model_cache_ttl_hours
     )
     model = session.exec(
@@ -264,7 +267,7 @@ def _latest_reusable_model(
         .where(
             CityModel.city_id == city_id,
             CityModel.temp_type == TempType.high,
-            CityModel.is_best == True,  # noqa: E712
+            CityModel.is_best == True,
             CityModel.trained_at >= cutoff,
             CityModel.data_end == last_observed_on,
         )
@@ -291,6 +294,7 @@ def run_forecast_for_market(session: Session, job_id: int) -> None:
     if not city:
         _set_job(session, job, JobStatus.failed, error="City not found", complete=True)
         return
+    assert city.id is not None
 
     try:
         _set_job(session, job, JobStatus.fetching)
@@ -327,13 +331,14 @@ def run_forecast_for_market(session: Session, job_id: int) -> None:
             for prior in session.exec(
                 select(CityModel).where(
                     CityModel.city_id == city.id,
-                    CityModel.is_best == True,  # noqa: E712
+                    CityModel.is_best == True,
                 )
             ).all():
                 prior.is_best = False
                 session.add(prior)
 
             best_db = None
+            assert training.series is not None
             for result in training.results:
                 selected = result is training.best_model
                 path = (
@@ -381,6 +386,8 @@ def run_forecast_for_market(session: Session, job_id: int) -> None:
             residual_rmse = training.residual_rmse
             calibration_method = training.calibration_method
 
+        assert best_db is not None
+        assert forecast is not None
         _set_job(session, job, JobStatus.evaluating)
         if market.target_date not in [item.date() for item in forecast.index]:
             raise ValueError("Forecast does not contain the exact target date")
@@ -388,7 +395,7 @@ def run_forecast_for_market(session: Session, job_id: int) -> None:
         buckets = session.exec(
             select(TempBucket).where(
                 TempBucket.market_id == market.id,
-                TempBucket.active == True,  # noqa: E712
+                TempBucket.active == True,
             )
         ).all()
         bucket_data = [

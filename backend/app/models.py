@@ -1,9 +1,12 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from enum import Enum
-from typing import Optional
 
-from sqlalchemy import CheckConstraint, Column, Index, JSON, UniqueConstraint, text
+from sqlalchemy import JSON, CheckConstraint, Column, Index, UniqueConstraint, text
 from sqlmodel import Field, SQLModel
+
+
+def utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 class TempType(str, Enum):
@@ -28,7 +31,7 @@ class JobType(str, Enum):
 class City(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("name", "country", name="uq_city_name_country"),)
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True)
     country: str = ""
     latitude: float
@@ -38,7 +41,7 @@ class City(SQLModel, table=True):
     data_source: str = "open-meteo"
     resolution_source: str = ""
     resolution_verified: bool = False
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class Market(SQLModel, table=True):
@@ -46,7 +49,7 @@ class Market(SQLModel, table=True):
         CheckConstraint("temp_type = 'high'", name="ck_market_high_only"),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     city_id: int = Field(foreign_key="city.id", index=True)
     polymarket_event_id: str = Field(index=True, unique=True)
     polymarket_slug: str = Field(default="", index=True, unique=True)
@@ -60,8 +63,8 @@ class Market(SQLModel, table=True):
     resolution_source: str = ""
     resolution_station: str = ""
     url: str = ""
-    last_synced_at: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    last_synced_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class TempBucket(SQLModel, table=True):
@@ -77,10 +80,10 @@ class TempBucket(SQLModel, table=True):
         ),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     market_id: int = Field(foreign_key="market.id", index=True)
     label: str
-    temp_c: Optional[float] = None
+    temp_c: float | None = None
     source_unit: str = "C"
     bucket_width_c: float = 1.0
     is_or_higher: bool = False
@@ -88,7 +91,7 @@ class TempBucket(SQLModel, table=True):
     token_id: str = ""
     yes_price: float = 0.0
     active: bool = True
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class Observation(SQLModel, table=True):
@@ -98,7 +101,7 @@ class Observation(SQLModel, table=True):
         ),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     city_id: int = Field(foreign_key="city.id", index=True)
     observed_on: date = Field(index=True)
     high_c: float
@@ -122,31 +125,31 @@ class ForecastJob(SQLModel, table=True):
         ),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
-    market_id: Optional[int] = Field(default=None, foreign_key="market.id", index=True)
+    id: int | None = Field(default=None, primary_key=True)
+    market_id: int | None = Field(default=None, foreign_key="market.id", index=True)
     job_type: JobType = Field(default=JobType.forecast, index=True)
     celery_task_id: str = ""
     status: JobStatus = JobStatus.queued
     error_message: str = ""
     attempts: int = 0
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    completed_at: Optional[datetime] = None
+    updated_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(default_factory=utc_now)
+    completed_at: datetime | None = None
 
 
 class CityModel(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     city_id: int = Field(foreign_key="city.id", index=True)
-    job_id: Optional[int] = Field(default=None, foreign_key="forecastjob.id")
+    job_id: int | None = Field(default=None, foreign_key="forecastjob.id")
     temp_type: TempType = TempType.high
     model_type: str
     file_path: str = ""
     artifact_uri: str = ""
     params: dict = Field(default_factory=dict, sa_column=Column(JSON))
     metrics: dict = Field(default_factory=dict, sa_column=Column(JSON))
-    mae: Optional[float] = None
-    rmse: Optional[float] = None
-    bias: Optional[float] = None
+    mae: float | None = None
+    rmse: float | None = None
+    bias: float | None = None
     data_start: date
     data_end: date
     dataset_fingerprint: str
@@ -155,15 +158,15 @@ class CityModel(SQLModel, table=True):
     backtest_folds: int
     calibration_sample_size: int = 0
     mlflow_run_id: str = ""
-    trained_at: datetime = Field(default_factory=datetime.utcnow)
+    trained_at: datetime = Field(default_factory=utc_now)
     is_best: bool = False
     is_comparable: bool = True
 
 
 class ModelPrediction(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     market_id: int = Field(foreign_key="market.id", index=True)
-    city_model_id: Optional[int] = Field(default=None, foreign_key="citymodel.id")
+    city_model_id: int | None = Field(default=None, foreign_key="citymodel.id")
     target_date: date = Field(index=True)
     point_forecast_c: float
     residual_rmse: float = 0.0
@@ -172,14 +175,14 @@ class ModelPrediction(SQLModel, table=True):
     bucket_probs: dict = Field(default_factory=dict, sa_column=Column(JSON))
     forecast_dates: list = Field(default_factory=list, sa_column=Column(JSON))
     forecast_temps: list = Field(default_factory=list, sa_column=Column(JSON))
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=utc_now)
 
 
 class EdgeSnapshot(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     market_id: int = Field(foreign_key="market.id", index=True)
     bucket_id: int = Field(foreign_key="tempbucket.id", index=True)
     model_prob: float
     market_prob: float
     edge: float
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=utc_now)

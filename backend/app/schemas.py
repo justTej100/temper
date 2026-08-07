@@ -1,5 +1,4 @@
 from datetime import date, datetime
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -9,19 +8,19 @@ from app.models import JobStatus, JobType, TempType
 class BucketOut(BaseModel):
     id: int
     label: str
-    temp_c: Optional[float]
+    temp_c: float | None
     yes_price: float
-    model_prob: Optional[float] = None
-    edge: Optional[float] = None
+    model_prob: float | None = None
+    edge: float | None = None
 
     model_config = {"from_attributes": True}
 
 
 class ModelComparisonOut(BaseModel):
     model_type: str
-    mae: Optional[float]
-    rmse: Optional[float]
-    bias: Optional[float]
+    mae: float | None
+    rmse: float | None
+    bias: float | None
     is_best: bool
     params: dict = {}
 
@@ -34,10 +33,10 @@ class MarketListItem(BaseModel):
     target_date: date
     volume: float
     url: str
-    top_bucket_label: Optional[str] = None
-    top_bucket_price: Optional[float] = None
-    max_edge: Optional[float] = None
-    best_model: Optional[str] = None
+    top_bucket_label: str | None = None
+    top_bucket_price: float | None = None
+    max_edge: float | None = None
+    best_model: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -61,24 +60,24 @@ class MarketDetail(BaseModel):
     history: list[dict]
     forecast_dates: list[str]
     forecast_temps: list[float]
-    point_forecast_c: Optional[float]
-    residual_rmse: Optional[float]
+    point_forecast_c: float | None
+    residual_rmse: float | None
     buckets: list[BucketOut]
     model_comparison: list[ModelComparisonOut]
-    best_model: Optional[str]
-    job_status: Optional[JobStatus] = None
+    best_model: str | None
+    job_status: JobStatus | None = None
 
 
 class JobOut(BaseModel):
     id: int
-    market_id: Optional[int]
+    market_id: int | None
     job_type: JobType
     status: JobStatus
     error_message: str
     attempts: int
     updated_at: datetime
     created_at: datetime
-    completed_at: Optional[datetime]
+    completed_at: datetime | None
 
     model_config = {"from_attributes": True}
 

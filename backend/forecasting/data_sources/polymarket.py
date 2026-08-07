@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 import httpx
@@ -52,7 +52,7 @@ def parse_title(question: str, *, today: date | None = None) -> dict | None:
     month = MONTHS.get(m.group("month").lower())
     if not month:
         return None
-    today = today or datetime.now().date()
+    today = today or datetime.now(UTC).date()
     explicit_year = m.group("year")
     year = int(explicit_year) if explicit_year else today.year
     day = int(m.group("day"))
@@ -158,7 +158,10 @@ def fetch_weather_events(limit: int = 100, max_pages: int = 10) -> list[dict]:
                         parsed = parse_title(markets[0].get("question") or title)
                     if not parsed:
                         continue
-                if parsed["temp_type"] != "high" or parsed["target_date"] < date.today():
+                if (
+                    parsed["temp_type"] != "high"
+                    or parsed["target_date"] < datetime.now(UTC).date()
+                ):
                     continue
                 station = resolve_city(parsed["city_raw"])
                 if not station:
