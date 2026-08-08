@@ -70,7 +70,7 @@ jobs:
       - run: mypy app forecasting --ignore-missing-imports
       - run: alembic upgrade head
       - run: alembic check
-      - run: pytest
+      - run: python -m pytest
       - run: pip-audit -r requirements.txt
 
   containers:
