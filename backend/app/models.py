@@ -51,8 +51,8 @@ class Market(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     city_id: int = Field(foreign_key="city.id", index=True)
-    polymarket_event_id: str = Field(index=True, unique=True)
-    polymarket_slug: str = Field(default="", index=True, unique=True)
+    polymarket_event_id: str = Field(unique=True)
+    polymarket_slug: str = Field(default="", unique=True)
     question: str = ""
     temp_type: TempType = TempType.high
     target_date: date = Field(index=True)
@@ -145,8 +145,14 @@ class CityModel(SQLModel, table=True):
     model_type: str
     file_path: str = ""
     artifact_uri: str = ""
-    params: dict = Field(default_factory=dict, sa_column=Column(JSON))
-    metrics: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    params: dict = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False),
+    )
+    metrics: dict = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False),
+    )
     mae: float | None = None
     rmse: float | None = None
     bias: float | None = None
@@ -172,9 +178,18 @@ class ModelPrediction(SQLModel, table=True):
     residual_rmse: float = 0.0
     calibration_method: str = "empirical"
     mlflow_run_id: str = ""
-    bucket_probs: dict = Field(default_factory=dict, sa_column=Column(JSON))
-    forecast_dates: list = Field(default_factory=list, sa_column=Column(JSON))
-    forecast_temps: list = Field(default_factory=list, sa_column=Column(JSON))
+    bucket_probs: dict = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False),
+    )
+    forecast_dates: list = Field(
+        default_factory=list,
+        sa_column=Column(JSON, nullable=False),
+    )
+    forecast_temps: list = Field(
+        default_factory=list,
+        sa_column=Column(JSON, nullable=False),
+    )
     generated_at: datetime = Field(default_factory=utc_now)
 
 
