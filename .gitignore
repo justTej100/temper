@@ -43,6 +43,8 @@ artifacts/
 *.sqlite3
 .mypy_cache/
 .ruff_cache/
+.cache/
+.pip-audit-cache/
 
 # Alembic / local DB dumps
 *.db

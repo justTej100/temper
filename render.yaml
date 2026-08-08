@@ -17,7 +17,7 @@ services:
     runtime: image
     plan: starter
     image:
-      url: ghcr.io/mlflow/mlflow:v2.14.1
+      url: ghcr.io/mlflow/mlflow:v3.15.1
     dockerCommand: >-
       sh -c 'mlflow server --host 0.0.0.0 --port ${PORT}
       --backend-store-uri "${DATABASE_URL}"
