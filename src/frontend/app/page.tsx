@@ -14,7 +14,7 @@ export default function Home() {
         />
         <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
           <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
+            To ade{" "}
             <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
               page.tsx
             </code>{" "}
@@ -47,7 +47,7 @@ export default function Home() {
           >
             <Image
               className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
+              src="/icon.svg"
               alt="Vercel logomark"
               width={16}
               height={14}
@@ -60,7 +60,7 @@ export default function Home() {
             target="_blank"
             rel="noopener noreferrer"
           >
-            Documentation
+            words go hereddd
           </a>
         </div>
       </main>
