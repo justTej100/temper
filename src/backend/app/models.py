@@ -11,6 +11,7 @@ def utc_now() -> datetime:
 
 class TempType(str, Enum):
     high = "high"
+    low = "low"
 
 
 class JobStatus(str, Enum):
@@ -46,7 +47,7 @@ class City(SQLModel, table=True):
 
 class Market(SQLModel, table=True):
     __table_args__ = (
-        CheckConstraint("temp_type = 'high'", name="ck_market_high_only"),
+        CheckConstraint("temp_type IN ('high', 'low')", name="ck_market_temp_type"),
     )
 
     id: int | None = Field(default=None, primary_key=True)
@@ -104,8 +105,24 @@ class Observation(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     city_id: int = Field(foreign_key="city.id", index=True)
     observed_on: date = Field(index=True)
-    high_c: float
+    high_c: float | None = None
+    low_c: float | None = None
     source: str = "open-meteo"
+
+
+class WeatherForecast(SQLModel, table=True):
+    """Open-Meteo's own 16-day forecast, refreshed by `sync`. Display only — never model input."""
+
+    __table_args__ = (
+        UniqueConstraint("city_id", "forecast_date", name="uq_weather_forecast_city_date"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    city_id: int = Field(foreign_key="city.id", index=True)
+    forecast_date: date = Field(index=True)
+    high_c: float | None = None
+    low_c: float | None = None
+    fetched_at: datetime = Field(default_factory=utc_now)
 
 
 class ForecastJob(SQLModel, table=True):
@@ -128,7 +145,6 @@ class ForecastJob(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     market_id: int | None = Field(default=None, foreign_key="market.id", index=True)
     job_type: JobType = Field(default=JobType.forecast, index=True)
-    celery_task_id: str = ""
     status: JobStatus = JobStatus.queued
     error_message: str = ""
     attempts: int = 0
@@ -145,21 +161,14 @@ class CityModel(SQLModel, table=True):
     model_type: str
     file_path: str = ""
     artifact_uri: str = ""
-    params: dict = Field(
-        default_factory=dict,
-        sa_column=Column(JSON, nullable=False),
-    )
-    metrics: dict = Field(
-        default_factory=dict,
-        sa_column=Column(JSON, nullable=False),
-    )
+    params: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    metrics: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
     mae: float | None = None
     rmse: float | None = None
     bias: float | None = None
     data_start: date
     data_end: date
     dataset_fingerprint: str
-    code_version: str = "phase1"
     target_horizon_days: int
     backtest_folds: int
     calibration_sample_size: int = 0
@@ -178,18 +187,9 @@ class ModelPrediction(SQLModel, table=True):
     residual_rmse: float = 0.0
     calibration_method: str = "empirical"
     mlflow_run_id: str = ""
-    bucket_probs: dict = Field(
-        default_factory=dict,
-        sa_column=Column(JSON, nullable=False),
-    )
-    forecast_dates: list = Field(
-        default_factory=list,
-        sa_column=Column(JSON, nullable=False),
-    )
-    forecast_temps: list = Field(
-        default_factory=list,
-        sa_column=Column(JSON, nullable=False),
-    )
+    bucket_probs: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    forecast_dates: list = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    forecast_temps: list = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     generated_at: datetime = Field(default_factory=utc_now)
 
 

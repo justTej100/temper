@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel
 
-from app.models import JobStatus, JobType, TempType
+from app.models import JobStatus, TempType
 
 
 class BucketOut(BaseModel):
@@ -23,6 +23,12 @@ class ModelComparisonOut(BaseModel):
     bias: float | None
     is_best: bool
     params: dict = {}
+
+
+class WeatherForecastPoint(BaseModel):
+    forecast_date: date
+    high_c: float | None = None
+    low_c: float | None = None
 
 
 class MarketListItem(BaseModel):
@@ -58,6 +64,7 @@ class MarketDetail(BaseModel):
     volume: float
     url: str
     history: list[dict]
+    weather_forecast: list[WeatherForecastPoint]
     forecast_dates: list[str]
     forecast_temps: list[float]
     point_forecast_c: float | None
@@ -66,20 +73,6 @@ class MarketDetail(BaseModel):
     model_comparison: list[ModelComparisonOut]
     best_model: str | None
     job_status: JobStatus | None = None
-
-
-class JobOut(BaseModel):
-    id: int
-    market_id: int | None
-    job_type: JobType
-    status: JobStatus
-    error_message: str
-    attempts: int
-    updated_at: datetime
-    created_at: datetime
-    completed_at: datetime | None
-
-    model_config = {"from_attributes": True}
 
 
 class EdgeOut(BaseModel):
@@ -93,11 +86,76 @@ class EdgeOut(BaseModel):
     target_date: date
 
 
-class JobCreated(BaseModel):
-    job_id: int
-    status: JobStatus
-    deduplicated: bool = False
+# --- ingest: from `ml` (daily — one finished, gated forecast) ---
+
+class IngestBucketResult(BaseModel):
+    label: str
+    probability: float
+    market_price: float
 
 
-# Kept as a schema alias for Phase 1 frontend compatibility.
-RetrainResponse = JobCreated
+class IngestHistoryPoint(BaseModel):
+    date: date
+    high_c: float | None = None
+    low_c: float | None = None
+
+
+class IngestForecastPayload(BaseModel):
+    polymarket_event_id: str
+    model_type: str
+    mae: float
+    rmse: float
+    bias: float
+    data_start: date
+    data_end: date
+    dataset_fingerprint: str
+    target_horizon_days: int
+    backtest_folds: int
+    calibration_sample_size: int = 0
+    mlflow_run_id: str = ""
+    point_forecast_c: float
+    residual_rmse: float
+    calibration_method: str = "empirical"
+    forecast_dates: list[str]
+    forecast_temps: list[float]
+    buckets: list[IngestBucketResult]
+    history: list[IngestHistoryPoint] = []
+
+
+# --- ingest: from `sync` (frequent — live prices + display forecast) ---
+
+class IngestCity(BaseModel):
+    name: str
+    country: str = ""
+    latitude: float
+    longitude: float
+    timezone: str
+    icao: str = ""
+
+
+class IngestBucket(BaseModel):
+    label: str
+    temp_c: float | None = None
+    source_unit: str = "C"
+    bucket_width_c: float = 1.0
+    is_or_higher: bool = False
+    is_or_lower: bool = False
+    token_id: str = ""
+    yes_price: float = 0.0
+
+
+class IngestMarket(BaseModel):
+    polymarket_event_id: str
+    polymarket_slug: str = ""
+    question: str = ""
+    temp_type: TempType
+    target_date: date
+    volume: float = 0.0
+    url: str = ""
+    buckets: list[IngestBucket]
+
+
+class IngestMarketDataPayload(BaseModel):
+    city: IngestCity
+    markets: list[IngestMarket]
+    weather_forecast: list[WeatherForecastPoint] = []
