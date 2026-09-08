@@ -8,8 +8,6 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     database_url: str = "postgresql://forecast@localhost:5433/forecast"
-    celery_broker_url: str = "redis://localhost:6379/0"
-    celery_result_backend: str = "redis://localhost:6379/0"
     mlflow_tracking_uri: str = "http://localhost:5000"
     mlflow_enabled: bool = True
     mlflow_experiment: str = "temperature-predictor"
