@@ -1,7 +1,6 @@
 import logging
 import uuid
 
-import redis
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -10,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.routes import router
 from app.config import get_settings
-from app.db import engine
+from app.db import engine, init_db
 
 logger = logging.getLogger("temperature_predictor.api")
 
@@ -31,6 +30,13 @@ app.add_middleware(
 )
 
 app.include_router(router)
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    # This build ships no Alembic migrations, so tables are created directly
+    # from the SQLModel metadata on boot.
+    init_db()
 
 
 @app.middleware("http")
@@ -72,10 +78,12 @@ def root():
         "name": "Temperature Predictor API",
         "docs": "/docs",
         "endpoints": {
-            "markets": "/api/markets/",
-            "edges": "/api/edges/",
-            "sync": "POST /api/sync/",
-            "jobs": "/api/jobs/{id}",
+            "events": "GET /events",
+            "event_detail": "GET /events/{event_slug}",
+            "event_weather": "GET /events/{event_slug}/weather",
+            "event_ml": "GET /events/{event_slug}/ml",
+            "create_ml_job": "POST /events/{event_slug}/ml-jobs",
+            "ml_job_status": "GET /events/{event_slug}/ml-jobs/{job_id}",
         },
     }
 
@@ -93,15 +101,6 @@ def ready():
             connection.execute(text("SELECT 1"))
     except SQLAlchemyError as exc:
         failures["postgresql"] = str(exc)
-    try:
-        client = redis.Redis.from_url(
-            settings.celery_broker_url,
-            socket_connect_timeout=2,
-            socket_timeout=2,
-        )
-        client.ping()
-    except redis.exceptions.RedisError as exc:
-        failures["redis"] = str(exc)
     if failures:
         return JSONResponse(
             status_code=503,

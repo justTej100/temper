@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     admin_token: str = ""
     gamma_api_url: str = "https://gamma-api.polymarket.com"
     open_meteo_url: str = "https://archive-api.open-meteo.com/v1/archive"
+    open_meteo_forecast_url: str = "https://api.open-meteo.com/v1/forecast"
     geocoding_api_url: str = "https://geocoding-api.open-meteo.com/v1/search"
     history_days: int = 730
     min_history_days: int = 365
