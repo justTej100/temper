@@ -1,20 +1,27 @@
 import type { TorontoMarket } from "@/lib/toronto-markets";
 import PolymarketMarketCard from "./PolymarketMarketCard";
+import PolymarketMarketCardStatic from "./PolymarketMarketCardStatic";
 import styles from "@/app/toronto/toronto.module.css";
 
-const CARDS_PER_ROW = 4;
+// How many cards are laid out before the row's loop repeats. This is a
+// purely visual/animation knob now — it's cheap to make this bigger because
+// only one card per row is ever a real iframe (see MarketRow below).
+const ROW_LENGTH = 8;
 
-/** Tile the (currently short) markets list up to a minimum row length so the
- * ticker always has enough cards to fill the viewport before it loops. */
-function tileMarkets(markets: TorontoMarket[]): TorontoMarket[] {
+/** Alternates through the (currently 2) markets. `offset` lets each row
+ * start on a different market so the two rows don't mirror each other. */
+function buildRow(markets: TorontoMarket[], offset: number): TorontoMarket[] {
   if (markets.length === 0) return [];
-  const length = Math.max(CARDS_PER_ROW, markets.length);
-  return Array.from({ length }, (_, i) => markets[i % markets.length]);
+  return Array.from(
+    { length: ROW_LENGTH },
+    (_, i) => markets[(i + offset) % markets.length]
+  );
 }
 
 interface MarketRowProps {
   markets: TorontoMarket[];
   rowIndex: number;
+  offset: number;
   direction: "left" | "right";
   durationSeconds: number;
 }
@@ -22,12 +29,13 @@ interface MarketRowProps {
 function MarketRow({
   markets,
   rowIndex,
+  offset,
   direction,
   durationSeconds,
 }: MarketRowProps) {
-  const tiled = tileMarkets(markets);
-  // Duplicate the row once so translating it exactly -50% loops seamlessly.
-  const looped = [...tiled, ...tiled];
+  const base = buildRow(markets, offset);
+  // Duplicate once so translating exactly -50% loops seamlessly.
+  const looped = [...base, ...base];
 
   return (
     <div className={styles.row}>
@@ -37,14 +45,25 @@ function MarketRow({
         }`}
         style={{ animationDuration: `${durationSeconds}s` }}
       >
-        {looped.map((market, i) => (
-          <PolymarketMarketCard
-            key={`row${rowIndex}-${market.id}-${i}`}
-            market={market}
-            instanceKey={`row${rowIndex}-${i}`}
-            withStructuredData={rowIndex === 0 && i === 0}
-          />
-        ))}
+        {looped.map((market, i) => {
+          // Only the first card in each row is a real, live embed. Every
+          // other card here — including the entire looped duplicate half —
+          // is the static, zero-network stand-in. That caps the whole page
+          // at exactly 2 real <iframe>s, no matter how long the row gets.
+          const isLive = i === 0;
+          const key = `row${rowIndex}-${market.id}-${i}`;
+
+          return isLive ? (
+            <PolymarketMarketCard
+              key={key}
+              market={market}
+              instanceKey={`row${rowIndex}-live`}
+              withStructuredData
+            />
+          ) : (
+            <PolymarketMarketCardStatic key={key} market={market} />
+          );
+        })}
       </div>
     </div>
   );
@@ -60,12 +79,14 @@ export default function MarketTicker({ markets }: MarketTickerProps) {
       <MarketRow
         markets={markets}
         rowIndex={0}
+        offset={0}
         direction="left"
         durationSeconds={42}
       />
       <MarketRow
         markets={markets}
         rowIndex={1}
+        offset={1}
         direction="right"
         durationSeconds={48}
       />

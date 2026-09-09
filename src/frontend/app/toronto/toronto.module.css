@@ -53,6 +53,9 @@
   animation-name: scroll-left;
   animation-timing-function: linear;
   animation-iteration-count: infinite;
+  /* Hint the browser to composite the scroll on its own layer instead of
+     repainting the row on the main thread every frame. */
+  will-change: transform;
 }
 
 .trackReverse {
@@ -138,6 +141,58 @@
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+.staticFrame {
+  box-sizing: border-box;
+  display: flex;
+  height: 100%;
+  width: 100%;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 16px;
+  background: #14161a;
+  color: #e7e9ea;
+}
+
+.staticQuestion {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.staticOdds {
+  display: flex;
+  gap: 8px;
+}
+
+.staticYes,
+.staticNo {
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.staticYes {
+  background: rgba(34, 197, 94, 0.18);
+  color: #4ade80;
+}
+
+.staticNo {
+  background: rgba(239, 68, 68, 0.18);
+  color: #f87171;
+}
+
+.staticBrand {
+  color: #6b7280;
+  font-size: 11px;
+  letter-spacing: 0.02em;
 }
 
 @media (max-width: 640px) {
